@@ -55,7 +55,7 @@ jobs:
       - run: npm run build
       # Shipped packages: block on moderate or worse. Dev tooling: block on high or worse.
       - run: npm audit --omit=dev --audit-level=moderate
-      - run: npm audit --audit-level=high
+      - run: node ../.github/scripts/audit-dev.mjs # high/critical; dated exceptions in .github/audit-exceptions.json
 
   frontend:
     runs-on: ubuntu-latest
@@ -75,7 +75,7 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm audit --omit=dev --audit-level=moderate
-      - run: npm audit --audit-level=high
+      - run: node ../.github/scripts/audit-dev.mjs # high/critical; dated exceptions in .github/audit-exceptions.json
 
   editor-spike:
     runs-on: ubuntu-latest

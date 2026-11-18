@@ -1,0 +1,11 @@
+{
+  "_comment": "Advisories accepted for DEV tooling only (the production audit has no exceptions). Each needs a reason and an expiry; after the expiry CI fails again so it is looked at.",
+  "exceptions": [
+    {
+      "advisory": "GHSA-fc5q-39xc-vjpf",
+      "package": "picomatch",
+      "reason": "ReDoS in picomatch <=4.0.7, reached only through dev tools (vite, vitest, typescript-eslint, @nestjs/cli) that match our own globs. No fixed release exists on 2026-11-18; npm's suggested fix is a downgrade.",
+      "expires": "2026-12-18"
+    }
+  ]
+}
