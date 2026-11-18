@@ -1,5 +1,7 @@
 # Rendered at start by the official nginx image: ${DOMAIN} comes from the environment.
 server_tokens off;
+# Host names up to 253 characters (the default bucket only fits about 45, and nginx then refuses to start).
+server_names_hash_bucket_size 256;
 
 # Requests for any other host name (IP scans, Host-header tricks) are dropped.
 server {
