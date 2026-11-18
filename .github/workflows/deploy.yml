@@ -1,0 +1,46 @@
+# Deploys every push to dev to the test server, after CI has passed on that exact commit.
+# Setup (deploy key, secrets, server checkout): docs/runbooks/auto-deploy.md
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [dev]
+
+permissions: {}
+
+concurrency:
+  group: deploy-test-server
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Only pushes to this repository (never pull requests or forks), and only when CI passed.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    environment: test-server
+    timeout-minutes: 30
+    steps:
+      - name: Deploy to the test server
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # The server's key only runs deploy/update.sh; the commit id is its only input.
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "${DEPLOY_USER:-ubuntu}@${DEPLOY_HOST}" "$SHA"
+      - name: Check the site answers
+        env:
+          DEPLOY_URL: ${{ vars.DEPLOY_URL }}
+        run: curl -fsS -o /dev/null -w 'HTTP %{http_code}\n' --retry 5 --retry-delay 5 --retry-all-errors "$DEPLOY_URL"

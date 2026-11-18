@@ -4,7 +4,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev] # a green run on dev triggers the Deploy workflow
   pull_request:
   schedule:
     - cron: '23 4 * * 1' # weekly, to catch newly published advisories
