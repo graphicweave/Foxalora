@@ -39,7 +39,7 @@ ssh -i foxalora-deploy ubuntu@<server-ip> "$(git rev-parse origin/dev)"
 
 ### 3. GitHub settings
 
-Repository → **Settings → Environments → New environment** `test-server` (optionally restrict it to the `dev` branch). In that environment add:
+Repository → **Settings → Environments → New environment** `foxalora` (optionally restrict it to the `dev` branch). The name must match `environment:` in `deploy.yml` exactly: if it does not, GitHub silently creates an empty environment and the deploy fails with `Could not resolve hostname`. In that environment add (`DEPLOY_HOST`, `DEPLOY_USER` and `DEPLOY_URL` as **variables**, not secrets):
 
 | Kind | Name | Value |
 |---|---|---|
