@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Renews the Let's Encrypt certificate (only when it is close to expiry) and reloads Nginx.
-# Run it daily from cron, for example:
+# Run it daily from ROOT's crontab (sudo crontab -e): the certificate folder belongs to root. For example:
 #   17 3 * * * /opt/foxalora/deploy/renew-cert.sh >> /var/log/foxalora-cert.log 2>&1
 set -euo pipefail
 cd "$(dirname "$0")"
+[ "$(id -u)" = 0 ] || { echo "Run as root (sudo): the Let's Encrypt folder belongs to root." >&2; exit 1; }
 DOMAIN=$(sed -n 's/^DOMAIN=//p' .env)
 [ -d "letsencrypt/live/$DOMAIN" ] || { echo "No Let's Encrypt certificate for $DOMAIN (installed with --letsencrypt?)." >&2; exit 1; }
 # Nginx keeps running and serves the challenge from deploy/acme/.

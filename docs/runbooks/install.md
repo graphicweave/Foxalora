@@ -6,10 +6,15 @@ Foxalora does not host mail. It connects to mail servers you already have (a hos
 
 ## 1. What you need
 
-- A Linux server (Ubuntu 24.04 tested in design; any distribution with Docker works), 2 CPU and 2 GB RAM or more, x86-64 or ARM64.
+- A Linux server (Ubuntu 24.04 and 26.04 tested; any distribution with Docker works), 1 to 2 CPU and 4 GB RAM recommended (2 GB works but the first build is tight), 30 GB disk, x86-64 or ARM64.
+- **Fast storage.** The first install builds Docker images, which is disk-heavy. On a throttled disk it can take hours or freeze the server: on AceCloud, "NVME General purpose" storage made a fresh server unusable, while "NVMe based High IOPS Storage" installed in minutes. Pick SSD/NVMe with normal or high IOPS.
 - Docker Engine with the Compose v2 plugin.
 - A domain name, e.g. `webmail.yourdomain.com`, whose DNS A record points at the server. A free DuckDNS subdomain also works.
 - Ports 80 and 443 open to the internet (80 is needed for Let's Encrypt).
+
+**Cloud firewall:** allow inbound TCP 22, 80 and 443 in the provider's security group or firewall (create a new group rather than editing a shared `default` one). Outbound must allow the mail ports (993, 465/587) so Foxalora can reach your mail server.
+
+**DNS on Cloudflare:** set the record to **DNS only** (grey cloud) so Let's Encrypt can reach the server directly.
 
 **Free option:** Oracle Cloud "Always Free" ARM instance (Ampere A1, up to 4 OCPU / 24 GB). Open ports 80 and 443 in both the VCN security list and the instance firewall. Free offers change; check the current terms when signing up.
 
@@ -30,9 +35,9 @@ sudo netfilter-persistent save
 
 ```bash
 sudo mkdir -p /opt/foxalora && sudo chown "$USER" /opt/foxalora
-git clone --branch dev https://github.com/ravis-farooq/foxalora.git /opt/foxalora
-# Without GitHub access, copy it from your machine instead:
-#   rsync -a --exclude node_modules --exclude dist --exclude .git ./ user@server:/opt/foxalora/
+git clone --branch dev https://github.com/graphicweave/Foxalora.git /opt/foxalora
+# Without GitHub access, copy it from your machine instead (a git clone is needed for automatic deploys):
+#   git archive HEAD | ssh user@server 'tar -x -C /opt/foxalora'
 cd /opt/foxalora
 ```
 
@@ -40,6 +45,8 @@ cd /opt/foxalora
 
 ```bash
 ./deploy/install.sh webmail.yourdomain.com --letsencrypt you@yourdomain.com
+# or without an email address (no expiry warnings from Let's Encrypt; renewal below still works):
+./deploy/install.sh webmail.yourdomain.com --letsencrypt
 ```
 
 The installer generates `deploy/.env` with random secrets, gets the certificate, builds the images (a few minutes on the first run), starts Nginx, the API, PostgreSQL and Valkey, runs migrations, and prints a **setup link**:
@@ -56,7 +63,7 @@ Open the setup link. The wizard has five steps:
 
 1. **Check**: HTTPS, database, session store, encryption key, production mode and site address. Continue is blocked while a check fails.
 2. **Administrator**: company name, administrator email and password (at least 12 characters). This account is for the admin console, not for reading mail.
-3. **Mail server**: the IMAP and SMTP host and security (SSL/TLS 993 or STARTTLS 143; SSL/TLS 465 or STARTTLS 587/25). **Test connection** checks the connection, TLS and certificate; with an optional test mailbox it also checks the login (the test password is used once and not stored). Advanced: "Mail server is on a private network" (only if it really is), "The server saves sent mail itself" (Gmail, Microsoft 365).
+3. **Mail server**: the IMAP and SMTP host and security (SSL/TLS 993 or STARTTLS 143; SSL/TLS 465 or STARTTLS 587/25). **Test connection** checks the connection, TLS and certificate; with an optional test mailbox it also checks the login (the test password is used once and not stored). Advanced: "Mail server is on a private network" (only if it really is), "The server saves sent mail itself" (Gmail, Microsoft 365, Zoho). If IMAP and SMTP have different host names, untick "Outgoing mail (SMTP) uses the same server" and enter both.
 4. **Domains**: the email domains whose users sign in through this server, one per line.
 5. **Review and finish**: everything is saved in one step; if anything fails, nothing is saved.
 
@@ -77,13 +84,29 @@ After finishing, the setup page answers "not found" for good, with or without th
 - Gmail: `--imap imap.gmail.com:993:tls --smtp smtp.gmail.com:465:tls --saves-sent`, map `gmail.com`; users sign in with an app password.
 - Unencrypted connections (`none-dev-only`) are refused in production.
 
+Settings for common providers:
+
+| Provider | IMAP | SMTP | Saves sent mail itself |
+|---|---|---|---|
+| cPanel / Plesk hosting | `mail.yourdomain.com` 993 SSL/TLS | same host, 465 SSL/TLS | no |
+| Zoho Mail (India) | `imappro.zoho.in` 993 SSL/TLS | `smtppro.zoho.in` 465 SSL/TLS | yes (if "Save copy of sent emails" is on) |
+| Zoho Mail (global) | `imappro.zoho.com` 993 SSL/TLS | `smtppro.zoho.com` 465 SSL/TLS | yes |
+| Gmail | `imap.gmail.com` 993 SSL/TLS | `smtp.gmail.com` 465 SSL/TLS | yes; users need an app password |
+
+**Zoho: IMAP is off by default for every mailbox.** Until it is turned on, the test connection shows "the server was reached, but the test mailbox could not sign in" while SMTP signs in fine, and users get the generic sign-in failure. The API log shows `login failed (imap_auth:ALERT)`. Each user turns it on in Zoho Mail: Settings → All Settings → Mail Accounts → their address → **IMAP Access**; or a Zoho admin does it under Users → the user → Mail Settings → IMAP/POP Access. Accounts with two-factor login sign in with a Zoho app password.
+
+Why a user cannot sign in: the login page always shows the same generic message (on purpose). The reason is in the API log: `./deploy/compose.sh logs api | grep -i login`.
+
 Sign in at `https://webmail.yourdomain.com` with a mailbox on one of the domains. **Write down how long the install took** (adoption target: 15 minutes).
 
-Certificate renewal (daily; it renews only when needed):
+Certificate renewal (daily; it renews only when needed). It must run as **root**: the certificate files belong to root, and the log goes to `/var/log`. In a normal user's crontab it fails silently and the certificate expires after 90 days.
 
 ```bash
-( crontab -l 2>/dev/null; echo "17 3 * * * /opt/foxalora/deploy/renew-cert.sh >> /var/log/foxalora-cert.log 2>&1" ) | crontab -
+( sudo crontab -l 2>/dev/null; echo "17 3 * * * /opt/foxalora/deploy/renew-cert.sh >> /var/log/foxalora-cert.log 2>&1" ) | sudo crontab -
+sudo /opt/foxalora/deploy/renew-cert.sh && echo "renewal works"
 ```
+
+Automatic deploys from GitHub on every push: `docs/runbooks/auto-deploy.md`.
 
 ## 5. Test server for testers
 
@@ -143,7 +166,7 @@ Before a server exists, `./deploy/testing/quick-tunnel.sh up` runs the same stac
 
 What is stored: PostgreSQL holds tenants, mail server settings, contacts, preferences, signatures and audit events, never mail or mailbox passwords. Valkey holds encrypted sessions in memory only; restarting it signs users out.
 
-## 7. Tested so far (2026-11-16, 2026-11-17)
+## 7. Tested so far (2026-11-16 to 2026-11-18)
 
 On a development machine with plain `docker` (no Compose plugin there), the same images and settings as `docker-compose.prod.yml`: images build; migrations run as the schema owner; the API runs read-only as the least-privilege role; the CLI creates a tenant and refuses `none-dev-only`; Nginx serves HTTPS with HSTS, CSP and `nosniff`, redirects HTTP to the configured domain only, rejects TLS 1.1 and unknown host names; login failures are generic; the cookie is `HttpOnly; Secure; SameSite=Strict`; a request without the CSRF header gets 403; send and receive work and the copy is saved to Sent; no password or session id appears in any container log.
 
@@ -153,4 +176,6 @@ Setup wizard (2026-11-16), on a fresh production-mode stack with plain `docker` 
 
 Fresh-server install (2026-11-17), following sections 2 to 4a on a clean Ubuntu 24.04 machine (a privileged container with its own Docker data disk, so Docker runs as on a real server, but no systemd and no public DNS): `get.docker.com` installed Docker with Compose 98 s after start; `./deploy/install.sh webmail.foxalora.test --self-signed` generated the secrets and certificate, built both images, ran migrations, waited for a healthy API and printed the setup link; **bare machine to setup link: 178 s**. The wizard, opened at the real host name, showed all six checks green, the connection test first failed SMTP with "same server" ticked and offered smtp.gmail.com, then passed both; finishing saved tenant, owner, server (with "saves sent mail itself"), domain and audit, and the setup routes then answered 404. HTTP redirects to HTTPS, an unknown host name is refused, a Gmail login with a wrong password reaches Gmail and gets the generic failure; no admin password, setup token or mailbox password in the API log. `install.sh` needs a host name with a dot (`localhost` is refused).
 
-Not yet tested: `enable.sh`, `tester.sh` and `gate.sh` with `docker compose` end to end, Let's Encrypt issue and renewal, an ARM64 build, a real server on the internet, the wizard's connection test with a real test mailbox login.
+Real server on the internet (2026-11-18), AceCloud Mumbai, 1 vCPU / 4 GB, NVMe High IOPS disk, Ubuntu 26.04, Cloudflare DNS (DNS only), Zoho Mail: Docker installed in 62 s; Let's Encrypt certificate issued (without an email address, the command `--letsencrypt` alone now runs); `install.sh` built, migrated and printed the setup link; **bare server to setup link about 6.5 minutes**. The wizard's connection test against `imappro.zoho.in:993` and `smtppro.zoho.in:465` with a real mailbox first failed IMAP (Zoho had IMAP off for the mailbox) while SMTP signed in, then passed both once IMAP Access was on. Sign-in, receiving mail from Gmail, sending to Gmail and the sent copy in Sent all worked. A second employee's sign-in failed with `imap_auth:ALERT` for the same Zoho reason. Renewal: `renew-cert.sh` as root, and a Let's Encrypt `renew --dry-run` through the running Nginx succeeded; in a normal user's crontab it failed (root-owned certificate folder), now documented. A first attempt on a server with "NVME General purpose" storage stalled at `apt-get update` with the disk 99% busy and the server stopped answering. Automatic deploys from GitHub (`auto-deploy.md`) deployed a commit in about 1 minute, keeping PostgreSQL and Valkey running.
+
+Not yet tested: `enable.sh`, `tester.sh` and `gate.sh` with `docker compose` end to end, an ARM64 build, a real certificate renewal at expiry (only the dry run), a cPanel or Plesk mail server.

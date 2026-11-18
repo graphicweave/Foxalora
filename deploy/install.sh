@@ -2,6 +2,7 @@
 # Foxalora Mail installer.
 # Usage:
 #   ./deploy/install.sh webmail.yourdomain.com --letsencrypt you@yourdomain.com   # real certificate
+#   ./deploy/install.sh webmail.yourdomain.com --letsencrypt                      # same, no expiry emails
 #   ./deploy/install.sh webmail.yourdomain.com --self-signed                      # testing only
 #   ./deploy/install.sh webmail.yourdomain.com                                    # your own deploy/certs/*.pem
 #
@@ -24,13 +25,14 @@ case "${2:-}" in
   *) echo "Unknown option: $2" >&2; exit 2 ;;
 esac
 
-usage() { sed -n '3,6p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 1; }
+usage() { sed -n '3,7p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 1; }
 [ -n "$DOMAIN" ] || usage
 # A plain host name only: letters, digits, dots and hyphens (it ends up in Nginx config and URLs).
 [[ "$DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]] \
   || { echo "Not a valid host name: $DOMAIN" >&2; exit 1; }
-if [ "$CERT_MODE" = letsencrypt ] && [[ ! "$LE_EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; then
-  echo "--letsencrypt needs an email address for expiry notices: --letsencrypt you@yourdomain.com" >&2; exit 1
+# The email is optional: Let's Encrypt only uses it for expiry warnings; renew-cert.sh renews anyway.
+if [ "$CERT_MODE" = letsencrypt ] && [ -n "$LE_EMAIL" ] && [[ ! "$LE_EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; then
+  echo "Not a valid email address: $LE_EMAIL (or leave it out: --letsencrypt alone)" >&2; exit 1
 fi
 
 cd "$(dirname "$0")"
@@ -85,14 +87,16 @@ elif [ "$CERT_MODE" = self-signed ]; then
 elif [ "$CERT_MODE" = letsencrypt ]; then
   # Port 80 must be free for the one-off challenge; the web container is not running yet on a first install.
   "${COMPOSE[@]}" stop web >/dev/null 2>&1 || true
+  if [ -n "$LE_EMAIL" ]; then LE_ACCOUNT=(-m "$LE_EMAIL"); else LE_ACCOUNT=(--register-unsafely-without-email); fi
   docker run --rm -p 80:80 -v "$PWD/letsencrypt:/etc/letsencrypt" certbot/certbot:v5.9.0 \
-    certonly --standalone --non-interactive --agree-tos -m "$LE_EMAIL" -d "$DOMAIN"
+    certonly --standalone --non-interactive --agree-tos "${LE_ACCOUNT[@]}" -d "$DOMAIN"
   cp -L "letsencrypt/live/$DOMAIN/fullchain.pem" certs/fullchain.pem
   (umask 077 && cp -L "letsencrypt/live/$DOMAIN/privkey.pem" certs/privkey.pem)
-  echo "Let's Encrypt certificate installed. Renew it with deploy/renew-cert.sh (see the docs for a cron line)."
+  echo "Let's Encrypt certificate installed. It expires in 90 days: set up daily renewal as root:"
+  echo "  ( sudo crontab -l 2>/dev/null; echo \"17 3 * * * $PWD/renew-cert.sh >> /var/log/foxalora-cert.log 2>&1\" ) | sudo crontab -"
 else
   echo "No certificate in deploy/certs/ (fullchain.pem and privkey.pem)." >&2
-  echo "Re-run with --letsencrypt you@yourdomain.com, or --self-signed for a quick test." >&2
+  echo "Re-run with --letsencrypt [you@yourdomain.com], or --self-signed for a quick test." >&2
   exit 1
 fi
 
