@@ -1,7 +1,7 @@
 # Contributing to Foxalora Mail
 
 Thank you for helping. Foxalora handles people's email, so security rules come before features.
-New to the project? Start with `docs/DEVELOPER_HANDOFF.md`.
+New to the project? Start with the quick start in `README.md`.
 
 ## Licence and sign-off
 

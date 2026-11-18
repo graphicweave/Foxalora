@@ -19,3 +19,16 @@ deploy/letsencrypt/
 dev/.vault-key
 deploy/testing/certs/
 deploy/testing/gate/
+
+# Internal planning and business documents: kept locally, not in the public repo
+docs/PRD-v1.0.pdf
+docs/PRD_GAP_ANALYSIS.md
+docs/COMPETITIVE_BENCHMARK.md
+docs/LAUNCH_KIT.md
+docs/Foxalora-Development-Backlog.xlsx
+docs/Foxalora-Jira-Import.csv
+docs/PHASE1_PROGRESS.md
+docs/DEVELOPER_HANDOFF.md
+docs/DECISIONS.md
+docs/PROTOTYPE_RESULTS.md
+docs/EDITOR_SPIKE_TIPTAP.md

@@ -1,6 +1,6 @@
 # Spike: Tiptap made email-specific (FOX-051)
 
-Throwaway spike, not production code. Results: `../../docs/EDITOR_SPIKE_TIPTAP.md`. Decision: `../../docs/DECISIONS.md` D-003.
+Throwaway spike, not production code. The Tiptap editor it proved is now in `frontend/src/editor/`.
 
 ```bash
 npm install

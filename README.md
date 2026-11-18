@@ -6,7 +6,7 @@ admin-mapped mail servers, SSRF guard, encrypted session vault.**
 
 > Status: Phase 0 done and Phase 1 (foundations) nearly done on 2026-11-12: PostgreSQL with
 > row-level security, encrypted session vault in Valkey, database-backed server registry,
-> security test suites. See `docs/PHASE1_PROGRESS.md`.
+> security test suites.
 
 ## Quick start (Node 22, Docker)
 
@@ -37,15 +37,14 @@ a hostile newsletter (tracking pixel, CSS background, deceptive link), plain tex
 | `node backend/dist/cli.js seed:mail --force` | add the sample messages again |
 
 GreenMail stays in `docker-compose.yml` (profile `greenmail`) for fast automated tests; it
-does not use TLS and behaves differently from production servers (`docs/PROTOTYPE_RESULTS.md`).
+does not use TLS and behaves differently from production servers.
 The API trusts the test CA through `NODE_EXTRA_CA_CERTS`; certificate verification stays on.
 The test servers never deliver to the internet: mail to outside addresses (gmail.com and so on)
 is caught by Mailpit, a local web inbox at http://localhost:8025 (`dev/mailservers/postfix-main.cf`). Ports 143, 993, 587 and 465 must be free on the machine.
 
-New developers: start with `docs/DEVELOPER_HANDOFF.md` (setup, test accounts, rules, how to contribute).
+New developers: start with `CONTRIBUTING.md`.
 
 Mail servers and domains are managed with the operator CLI: `node dist/cli.js help`.
-Progress and test status: `docs/PROTOTYPE_RESULTS.md` (Phase 0), `docs/PHASE1_PROGRESS.md` (Phase 1).
 
 ## What is implemented (PRD mapping)
 
@@ -85,7 +84,7 @@ CSV contact import, filtered and cross-folder search, attachments on send,
 threading, IMAP IDLE/connection pooling, admin UI,
 admin console (the setup wizard exists), i18n/RTL, SSO adapters, separate-origin email rendering,
 most tests (only backend security unit tests exist).
-All are in the Development Backlog.
+All are planned.
 
 ## Installing on a server (test and pilot only)
 
