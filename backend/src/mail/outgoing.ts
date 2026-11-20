@@ -3,17 +3,20 @@ import { BadRequestException } from '@nestjs/common';
 import MailComposer from 'nodemailer/lib/mail-composer';
 import { EMAIL_RE } from '../common/email';
 import { sanitizeEmailHtml } from '../security/sanitize';
+import { validateAttachments, type OutgoingAttachment } from './attachments';
 import { validateInlineImages } from './inline-images';
 
 export const MAX_RECIPIENTS = 100;
 
 export interface OutgoingInput {
-  to?: unknown; cc?: unknown; bcc?: unknown; subject?: unknown; text?: unknown; html?: unknown; inlineImages?: unknown;
+  to?: unknown; cc?: unknown; bcc?: unknown; subject?: unknown; text?: unknown; html?: unknown; inlineImages?: unknown; attachments?: unknown;
 }
 
 export interface Outgoing {
   to: string[]; cc: string[]; bcc: string[]; subject: string; text: string; html?: string;
   attachments: ReturnType<typeof validateInlineImages>;
+  /** Regular file attachments; sent, but not kept in drafts (the body limit stays small). */
+  files: OutgoingAttachment[];
 }
 
 /**
@@ -40,7 +43,8 @@ export function parseOutgoing(m: OutgoingInput, mode: 'send' | 'draft'): Outgoin
   const html = typeof m.html === 'string' && m.html ? sanitizeEmailHtml(m.html) : undefined;
   // Inline images from the editor (cid:), validated by sniffed type and size (rule 11).
   const attachments = validateInlineImages(m.inlineImages, html ?? '');
-  return { to, cc, bcc, subject, text: typeof m.text === 'string' ? m.text : '', html, attachments };
+  const files = mode === 'send' ? validateAttachments(m.attachments) : [];
+  return { to, cc, bcc, subject, text: typeof m.text === 'string' ? m.text : '', html, attachments, files };
 }
 
 function compose(address: string, name: string | undefined, d: Outgoing, messageId: string, date: Date, keepBcc: boolean): Promise<Buffer> {
@@ -50,7 +54,7 @@ function compose(address: string, name: string | undefined, d: Outgoing, message
     subject: d.subject,
     text: d.text,
     html: d.html,
-    attachments: d.attachments,
+    attachments: [...d.attachments, ...d.files],
     messageId,
     date,
     // Content comes only from validated input; never from local files or URLs.

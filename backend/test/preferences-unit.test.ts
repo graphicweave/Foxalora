@@ -9,11 +9,12 @@ describe('preferences (FOX-077)', () => {
       .toEqual({ displayName: 'Carol Smith', theme: 'dark', density: 'compact', timeZone: 'Asia/Karachi' });
     expect(parsePreferencesPatch({ timeZone: 'auto' })).toEqual({ timeZone: 'auto' });
     expect(parsePreferencesPatch({ timeZone: 'UTC' })).toEqual({ timeZone: 'UTC' });
+    expect(parsePreferencesPatch({ spellCheck: false })).toEqual({ spellCheck: false });
   });
 
   it('refuses unknown keys and invalid values', () => {
     const bad: unknown[] = [
-      null, [], 'x', { theme: 'pink' }, { density: 1 }, { timeZone: 'Mars/Base' }, { colour: 'red' },
+      null, [], 'x', { theme: 'pink' }, { density: 1 }, { timeZone: 'Mars/Base' }, { colour: 'red' }, { spellCheck: 'yes' },
       { displayName: 'x'.repeat(101) }, { displayName: 'Carol\r\nBcc: x@y.test' },
       // A display name that looks like an address would mislead recipients.
       { displayName: 'PayPal <security@paypal.com>' }, { __proto__: { theme: 'dark' }, polluted: true },

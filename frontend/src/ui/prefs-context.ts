@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react';
 import type { Preferences } from '../api';
 
-export const DEFAULT_PREFS: Preferences = { displayName: '', theme: 'system', density: 'comfortable', timeZone: 'auto', rememberRecipients: true, onboarded: false };
+export const DEFAULT_PREFS: Preferences = { displayName: '', theme: 'system', density: 'comfortable', timeZone: 'auto', rememberRecipients: true, spellCheck: true, onboarded: false };
 
 export interface PrefsState {
   prefs: Preferences;

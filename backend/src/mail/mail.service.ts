@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import type { ImapFlow, MessageAddressObject, MessageStructureObject } from 'imapflow';
+import type { FetchMessageObject, ImapFlow, MessageAddressObject, MessageStructureObject } from 'imapflow';
 import type { Readable } from 'node:stream';
 import { safeFilename } from '../security/filename';
 import { sanitizeEmailHtml } from '../security/sanitize';
@@ -13,6 +13,30 @@ import { saveSentCopy, type SentCopy } from './sent-copy';
 import { MAX_SEARCH_RESULTS, searchCriteria } from './search';
 
 const MAX_PAGE_SIZE = 100;
+// Cross-folder search caps (E09): bounded per folder, in total and in time.
+const SEARCH_ALL_MAX_FOLDERS = 50;
+const SEARCH_ALL_PER_FOLDER = 50;
+const SEARCH_ALL_MAX_RESULTS = 200;
+const SEARCH_ALL_TIME_MS = 10_000;
+
+/** One message list entry from envelope headers; `uid` is dropped before the response. */
+function summarize(m: FetchMessageObject, folder: string, uidValidity: bigint) {
+  const from = m.envelope?.from?.[0];
+  const to = m.envelope?.to?.[0];
+  return {
+    id: encodeMessageId(folder, uidValidity, m.uid),
+    subject: m.envelope?.subject ?? '(no subject)',
+    from: { name: from?.name ?? '', address: from?.address ?? '' },
+    // First recipient: Sent and Drafts show who a message is for.
+    to: { name: to?.name ?? '', address: to?.address ?? '' },
+    toCount: (m.envelope?.to?.length ?? 0) + (m.envelope?.cc?.length ?? 0),
+    date: m.envelope?.date ?? null,
+    seen: m.flags?.has('\\Seen') ?? false,
+    flagged: m.flags?.has('\\Flagged') ?? false,
+    hasAttachment: classifyParts(m.bodyStructure).attachments.some((a) => !a.inline),
+    uid: m.uid,
+  };
+}
 // Fetch policy (CLAUDE.md rule 10, D1): only text parts are read when a message is
 // opened, each capped; attachments are streamed one part at a time, on request.
 const MAX_TEXT_BYTES = Number(process.env.MAIL_MAX_TEXT_BYTES ?? 2 * 1024 * 1024);
@@ -316,27 +340,58 @@ export class MailService {
         // Headers/envelope only; bodies are fetched when a message is opened. A sequence
         // range only pages the plain list; every item is identified by UID.
         for await (const m of client.fetch(range, { uid: true, envelope: true, flags: true, bodyStructure: true }, { uid: byUid })) {
-          const from = m.envelope?.from?.[0];
-          const to = m.envelope?.to?.[0];
-          items.push({
-            id: encodeMessageId(folder, box.uidValidity, m.uid),
-            subject: m.envelope?.subject ?? '(no subject)',
-            from: { name: from?.name ?? '', address: from?.address ?? '' },
-            // First recipient: Sent and Drafts show who a message is for.
-            to: { name: to?.name ?? '', address: to?.address ?? '' },
-            toCount: (m.envelope?.to?.length ?? 0) + (m.envelope?.cc?.length ?? 0),
-            date: m.envelope?.date ?? null,
-            seen: m.flags?.has('\\Seen') ?? false,
-            flagged: m.flags?.has('\\Flagged') ?? false,
-            hasAttachment: classifyParts(m.bodyStructure).attachments.some((a) => !a.inline),
-            uid: m.uid,
-          });
+          items.push(summarize(m, folder, box.uidValidity));
         }
         items.sort((a, b) => b.uid - a.uid);
         return { uidValidity, total, items: items.map(({ uid: _uid, ...rest }) => rest) };
       } finally {
         lock.release();
       }
+    });
+  }
+
+  /**
+   * Search across every folder (E09). Bounded per folder, in total and in time, so a
+   * broad search cannot hold the connection for long; `truncated` tells the client
+   * when there is more than what is shown.
+   */
+  async searchAllFolders(c: MailboxCreds, query: unknown) {
+    const criteria = searchCriteria(query);
+    if (!criteria) throw new BadRequestException('search text required');
+    return this.withImap(c, async (client) => {
+      const selectable = (await client.list()).filter((f) => !f.flags?.has('\\Noselect'));
+      let truncated = selectable.length > SEARCH_ALL_MAX_FOLDERS;
+      const folders = selectable.slice(0, SEARCH_ALL_MAX_FOLDERS);
+      const started = Date.now();
+      const items: (ReturnType<typeof summarize> & { folder: string })[] = [];
+      for (const f of folders) {
+        if (Date.now() - started > SEARCH_ALL_TIME_MS || items.length >= SEARCH_ALL_MAX_RESULTS) {
+          truncated = true;
+          break;
+        }
+        let lock;
+        try {
+          lock = await client.getMailboxLock(f.path);
+        } catch {
+          continue; // a folder that cannot be opened is skipped, not fatal
+        }
+        try {
+          const box = client.mailbox;
+          if (!box) continue;
+          const found = (await client.search(criteria, { uid: true }).catch(() => null)) || [];
+          if (!found.length) continue;
+          const uids = found.sort((a, b) => b - a).slice(0, SEARCH_ALL_PER_FOLDER);
+          if (found.length > uids.length) truncated = true;
+          for await (const m of client.fetch(uids.join(','), { uid: true, envelope: true, flags: true, bodyStructure: true }, { uid: true })) {
+            items.push({ ...summarize(m, f.path, box.uidValidity), folder: f.path });
+          }
+        } finally {
+          lock.release();
+        }
+      }
+      items.sort((a, b) => (b.date ? +new Date(b.date) : 0) - (a.date ? +new Date(a.date) : 0));
+      const shown = items.slice(0, SEARCH_ALL_MAX_RESULTS).map(({ uid: _uid, ...rest }) => rest);
+      return { items: shown, total: shown.length, truncated: truncated || items.length > shown.length };
     });
   }
 

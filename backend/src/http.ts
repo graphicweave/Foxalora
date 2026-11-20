@@ -35,7 +35,8 @@ export function configureApp(app: INestApplication) {
 
   // Request size limits: sending may carry inline images (validated: 10 MB of images max);
   // everything else stays small.
-  app.use('/api/v1/messages/send', json({ limit: '15mb' }));
+  // 20 MB of attachments + 10 MB of inline images, with base64 overhead (~4/3).
+  app.use('/api/v1/messages/send', json({ limit: '45mb' }));
   app.use('/api/v1/drafts', json({ limit: '15mb' })); // drafts carry the same inline images
   app.use('/api/v1/contacts/import', json({ limit: '3mb' })); // vCard files up to 2 MB
   app.use(json({ limit: '1mb' }));

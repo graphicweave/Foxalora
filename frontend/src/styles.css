@@ -170,6 +170,10 @@ button.folder-toggle:hover { color: var(--text); background: var(--hover); }
 .msg-item.unread .msg-from, .msg-item.unread .msg-subject { font-weight: 700; color: var(--text); }
 .msg-item.unread .msg-date { color: var(--accent-text); font-weight: 600; }
 .msg-icons { flex-shrink: 0; display: flex; gap: 4px; color: var(--muted); }
+.msg-folder { flex-shrink: 0; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 7px; border-radius: 9px; background: var(--hover); color: var(--muted); font-size: 11px; }
+.search-scope { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 12px; border-bottom: 1px solid var(--line); }
+.search-scope button { border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 12px; padding: 3px 10px; border-radius: 12px; cursor: pointer; }
+.search-scope button.active { background: var(--accent-soft); border-color: transparent; color: var(--accent-text); font-weight: 600; }
 .msg-icons svg { width: 15px; height: 15px; display: block; }
 .msg-icons .flagged { color: var(--star); }
 .msg-icons .flagged svg { fill: currentColor; }
@@ -272,6 +276,13 @@ a.tool-btn { text-decoration: none; }
 .compose-note { display: flex; align-items: center; gap: 8px; margin: 0 4px 8px; padding: 8px 10px; border-radius: 8px; background: #eef4ff; color: #1d3a6b; font-size: 13px; }
 .compose-note svg { flex-shrink: 0; width: 17px; height: 17px; }
 .compose-error { margin: 0 4px 8px; }
+.attach-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 4px 8px; padding: 0; list-style: none; }
+.attach-chip { display: flex; align-items: center; gap: 6px; max-width: 280px; padding: 3px 4px 3px 10px; border: 1px solid var(--line); border-radius: 16px; background: var(--hover); font-size: 13px; }
+.attach-chip > svg { width: 15px; height: 15px; flex-shrink: 0; color: var(--muted); }
+.attach-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attach-size { color: var(--muted); flex-shrink: 0; }
+.attach-remove { width: 22px; height: 22px; flex-shrink: 0; }
+.attach-remove svg { width: 13px; height: 13px; }
 
 /* ---------- Recipient suggestions ---------- */
 .recipient { position: relative; flex: 1; min-width: 0; display: flex; }
@@ -429,3 +440,4 @@ button.primary.danger:hover:not(:disabled) { background: #8f1d14; }
   .toasts { bottom: 76px; }
 }
 @media (prefers-reduced-motion: reduce) { .folders { transition: none; } }
+

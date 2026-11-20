@@ -16,6 +16,7 @@ export interface MessageSummary {
   seen: boolean; flagged: boolean; hasAttachment: boolean;
 }
 export interface MessageList { uidValidity: string; total: number; items: MessageSummary[] }
+export interface SearchAllResult { items: (MessageSummary & { folder: string })[]; total: number; truncated: boolean }
 export interface MessageFull {
   id: string; subject: string; from: Addr[]; to: Addr[]; cc: Addr[]; bcc?: Addr[]; date: string | null;
   text: string; html: string | null;
@@ -30,13 +31,15 @@ export interface Contact extends ContactDraft { id: string }
 export interface Suggestion { name: string; email: string; source: 'contact' | 'recent' }
 export interface Preferences {
   displayName: string; theme: 'system' | 'light' | 'dark'; density: 'comfortable' | 'compact'; timeZone: string;
-  rememberRecipients: boolean; onboarded: boolean;
+  rememberRecipients: boolean; spellCheck: boolean; onboarded: boolean;
 }
 export interface SignatureRecord { id: string; name: string; content: JSONContent; isDefault: boolean }
 export type SignatureDraft = Omit<SignatureRecord, 'id'>;
 export interface OutgoingMessage {
   to: string[]; cc?: string[]; bcc?: string[]; subject: string; text: string; html?: string;
   inlineImages?: { contentId: string; filename: string; contentType: string; data: string }[];
+  /** Regular file attachments (sent only; drafts do not keep them). */
+  attachments?: { filename: string; contentType: string; data: string }[];
 }
 
 export class ApiError extends Error {
@@ -78,6 +81,7 @@ export const api = {
     call<{ newIds: string[]; target?: string; created?: boolean }>('POST', '/messages/bulk', { ids, action, target }),
   list: (folder: string, page: number, search = '') =>
     call<MessageList>('GET', `/messages${q({ folder, page, pageSize: PAGE_SIZE, ...(search ? { q: search } : {}) })}`),
+  searchAll: (search: string) => call<SearchAllResult>('GET', `/messages/search${q({ q: search })}`),
   // Message ids are opaque (folder + UIDVALIDITY + UID); a 409 folder_reset means reload the list.
   get: (id: string) => call<MessageFull>('GET', `/messages/${encodeURIComponent(id)}`),
   flag: (id: string, f: { seen?: boolean; flagged?: boolean }) => call<void>('PATCH', `/messages/${encodeURIComponent(id)}`, f),

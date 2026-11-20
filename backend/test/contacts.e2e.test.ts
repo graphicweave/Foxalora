@@ -155,7 +155,7 @@ describe.skipIf(!hasPg || !VALKEY)('contacts, preferences and signatures over HT
   });
 
   it('stores preferences per mailbox, validates them and uses the display name when sending', async () => {
-    expect((await alice('GET', '/preferences')).json).toEqual({ displayName: '', theme: 'system', density: 'comfortable', timeZone: 'auto', rememberRecipients: true, onboarded: false });
+    expect((await alice('GET', '/preferences')).json).toEqual({ displayName: '', theme: 'system', density: 'comfortable', timeZone: 'auto', rememberRecipients: true, spellCheck: true, onboarded: false });
     expect((await alice('PATCH', '/preferences', { displayName: 'Alice A', theme: 'dark' })).json.theme).toBe('dark');
     expect((await alice('PATCH', '/preferences', { theme: 'pink' })).status).toBe(400);
     expect((await alice('PATCH', '/preferences', { isAdmin: true })).status).toBe(400);

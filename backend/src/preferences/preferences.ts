@@ -15,11 +15,13 @@ export interface Preferences {
   timeZone: string;
   /** Keep the addresses written to, for recipient suggestions. */
   rememberRecipients: boolean;
+  /** Browser spell checking while writing; the text never leaves the device for it. */
+  spellCheck: boolean;
   /** The first-run guide was finished or skipped. */
   onboarded: boolean;
 }
 
-export const DEFAULT_PREFERENCES: Preferences = { displayName: '', theme: 'system', density: 'comfortable', timeZone: 'auto', rememberRecipients: true, onboarded: false };
+export const DEFAULT_PREFERENCES: Preferences = { displayName: '', theme: 'system', density: 'comfortable', timeZone: 'auto', rememberRecipients: true, spellCheck: true, onboarded: false };
 
 const TIME_ZONES = new Set([...Intl.supportedValuesOf('timeZone'), 'UTC']);
 
@@ -32,6 +34,7 @@ const CHECKS: { [K in keyof Preferences]: Check } = {
   density: (v) => v === 'comfortable' || v === 'compact',
   timeZone: (v) => typeof v === 'string' && (v === 'auto' || TIME_ZONES.has(v)),
   rememberRecipients: (v) => typeof v === 'boolean',
+  spellCheck: (v) => typeof v === 'boolean',
   onboarded: (v) => typeof v === 'boolean',
 };
 const KEYS = Object.keys(CHECKS) as (keyof Preferences)[];

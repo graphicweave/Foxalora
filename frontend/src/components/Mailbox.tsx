@@ -10,7 +10,7 @@ import type { ComposeInit } from './Compose';
 import FolderDialog from './FolderDialog';
 import MessageView from './MessageView';
 
-interface ListState { items: MessageSummary[]; total: number }
+interface ListState { items: (MessageSummary & { folder?: string })[]; total: number }
 type Dialog = { mode: 'create'; parent?: Folder } | { mode: 'rename'; folder: Folder } | null;
 
 const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -27,6 +27,8 @@ export default function Mailbox({ email, onCompose, version }: { email: string; 
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState(''); // text in the box
   const [query, setQuery] = useState(''); // search that produced the list
+  const [scope, setScope] = useState<'folder' | 'all'>('folder'); // where a search looks
+  const [truncated, setTruncated] = useState(false); // all-folder search hit its caps
   const [list, setList] = useState<ListState>({ items: [], total: 0 });
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState('');
@@ -43,7 +45,7 @@ export default function Mailbox({ email, onCompose, version }: { email: string; 
   const listSeq = useRef(0);
   const openSeq = useRef(0);
   // Where the list is, for refreshes started elsewhere (a draft saved, a message sent).
-  const view = useRef({ folder: 'INBOX', page: 1, query: '' });
+  const view = useRef({ folder: 'INBOX', page: 1, query: '', scope: 'folder' as 'folder' | 'all' });
   // Where messages deleted in this session came from (Trash id -> folder), for Restore.
   // A stable Map (never re-renders); kept in state so menu callbacks built during render may use it.
   const [origins] = useState(() => new Map<string, string>());
@@ -67,14 +69,33 @@ export default function Mailbox({ email, onCompose, version }: { email: string; 
   }, [toast]);
 
   const loadList = useCallback((f: string, p: number, q: string) => {
-    view.current = { folder: f, page: p, query: q };
+    view.current = { folder: f, page: p, query: q, scope: 'folder' };
+    const seq = ++listSeq.current;
+    setLoading(true);
+    setListError('');
+    setChecked(new Set());
+    setTruncated(false);
+    api
+      .list(f, p, q)
+      .then((r) => seq === listSeq.current && setList({ items: r.items, total: r.total }))
+      .catch((e: Error) => seq === listSeq.current && setListError(e.message))
+      .finally(() => seq === listSeq.current && setLoading(false));
+  }, []);
+
+  /** Search in every folder: one bounded result list, no paging. */
+  const loadAll = useCallback((q: string) => {
+    view.current = { folder: view.current.folder, page: 1, query: q, scope: 'all' };
     const seq = ++listSeq.current;
     setLoading(true);
     setListError('');
     setChecked(new Set());
     api
-      .list(f, p, q)
-      .then((r) => seq === listSeq.current && setList({ items: r.items, total: r.total }))
+      .searchAll(q)
+      .then((r) => {
+        if (seq !== listSeq.current) return;
+        setList({ items: r.items, total: r.total });
+        setTruncated(r.truncated);
+      })
       .catch((e: Error) => seq === listSeq.current && setListError(e.message))
       .finally(() => seq === listSeq.current && setLoading(false));
   }, []);
@@ -94,10 +115,14 @@ export default function Mailbox({ email, onCompose, version }: { email: string; 
   useEffect(() => {
     if (!version) return;
     loadFolders();
-    const { folder: f, page: p, query: q } = view.current;
+    const { folder: f, page: p, query: q, scope: s } = view.current;
+    if (s === 'all' && q) {
+      loadAll(q);
+      return;
+    }
     const seq = ++listSeq.current;
     api.list(f, p, q).then((r) => seq === listSeq.current && setList({ items: r.items, total: r.total }), () => undefined);
-  }, [version, loadFolders]);
+  }, [version, loadFolders, loadAll]);
 
   // Phone layout: Escape closes the folder drawer.
   useEffect(() => {
@@ -119,6 +144,7 @@ export default function Mailbox({ email, onCompose, version }: { email: string; 
     setPage(1);
     setSearch('');
     setQuery('');
+    setScope('folder');
     setDrawer(false);
     closeMessage();
     loadList(path, 1, '');
@@ -135,11 +161,22 @@ export default function Mailbox({ email, onCompose, version }: { email: string; 
     setQuery(q);
     setPage(1);
     closeMessage();
-    loadList(folder, 1, q);
+    if (scope === 'all' && q) loadAll(q);
+    else loadList(folder, 1, q);
+  }
+
+  function switchScope(s: 'folder' | 'all') {
+    if (s === scope) return;
+    setScope(s);
+    setPage(1);
+    closeMessage();
+    if (s === 'all' && query) loadAll(query);
+    else loadList(folder, 1, query);
   }
 
   function clearSearch() {
     setSearch('');
+    setScope('folder');
     if (!query) return;
     setQuery('');
     setPage(1);
@@ -148,7 +185,8 @@ export default function Mailbox({ email, onCompose, version }: { email: string; 
 
   function refresh() {
     loadFolders();
-    loadList(folder, page, query);
+    if (scope === 'all' && query) loadAll(query);
+    else loadList(folder, page, query);
   }
 
   const patchItem = (id: string, change: Partial<MessageSummary>) =>
@@ -406,9 +444,14 @@ export default function Mailbox({ email, onCompose, version }: { email: string; 
     else runBulk(ids, 'move', f.path);
   }
 
+  const allMode = scope === 'all' && !!query;
   const first = list.total ? (page - 1) * PAGE_SIZE + 1 : 0;
   const last = Math.min(page * PAGE_SIZE, list.total);
-  const pages = Math.max(1, Math.ceil(list.total / PAGE_SIZE));
+  const pages = allMode ? 1 : Math.max(1, Math.ceil(list.total / PAGE_SIZE));
+  const nameOf = (path: string) => {
+    const f = folders.find((x) => x.path === path);
+    return f ? folderLabel(f) : path.split(delimiter).pop() || path;
+  };
   const rows = folderRows(folders, collapsed);
   const selectedIds = [...checked];
   const anyUnread = list.items.some((m) => checked.has(m.id) && !m.seen);
@@ -490,11 +533,27 @@ export default function Mailbox({ email, onCompose, version }: { email: string; 
           <button type="button" className="icon-btn only-mobile" aria-label="Show folders" onClick={() => setDrawer(true)}>{Icon.menu}</button>
           <form role="search" className="search" onSubmit={runSearch} data-guide="search">
             {Icon.search}
-            <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={`Search ${label}`} aria-label={`Search ${label}`} maxLength={100} />
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={scope === 'all' ? 'Search all folders' : `Search ${label}`}
+              aria-label={scope === 'all' ? 'Search all folders' : `Search ${label}`}
+              title="Narrow a search with from: to: subject: is:unread is:read is:starred before:2026-01-31 after:2026-01-01"
+              maxLength={200}
+            />
             {(search || query) && <button type="button" className="icon-btn" aria-label="Clear search" onClick={clearSearch}>{Icon.x}</button>}
           </form>
           <button type="button" className="icon-btn" aria-label="Refresh" data-tip="Check for new mail" onClick={refresh}>{Icon.refresh}</button>
         </div>
+
+        {query && (
+          <div className="search-scope" role="radiogroup" aria-label="Search in">
+            <button type="button" className={scope === 'folder' ? 'active' : ''} aria-pressed={scope === 'folder'} onClick={() => switchScope('folder')}>{label}</button>
+            <button type="button" className={scope === 'all' ? 'active' : ''} aria-pressed={scope === 'all'} onClick={() => switchScope('all')}>All folders</button>
+            {scope === 'all' && truncated && <span className="muted small">Showing the closest matches. Narrow the search to see the rest.</span>}
+          </div>
+        )}
 
         {checked.size > 0 ? (
           <div className="bulk-bar" role="toolbar" aria-label="Actions for the selected messages">
@@ -569,6 +628,7 @@ export default function Mailbox({ email, onCompose, version }: { email: string; 
                         <span className="msg-line">
                           <span className="msg-subject ellipsis" dir="auto">{m.subject}</span>
                           <span className="msg-icons">
+                            {allMode && m.folder && <span className="msg-folder" title={m.folder}>{nameOf(m.folder)}</span>}
                             {m.hasAttachment && <span title="Has attachments">{Icon.paperclip}</span>}
                             {m.flagged && <span className="flagged" title="Starred">{Icon.star}</span>}
                           </span>
@@ -600,7 +660,7 @@ export default function Mailbox({ email, onCompose, version }: { email: string; 
         <footer className="pager" aria-label="Pages">
           <button type="button" className="icon-btn" aria-label="First page" disabled={page <= 1 || loading} onClick={() => goToPage(1)}>{Icon.chevronsLeft}</button>
           <button type="button" className="icon-btn" aria-label="Previous page" disabled={page <= 1 || loading} onClick={() => goToPage(page - 1)}>{Icon.chevronLeft}</button>
-          <span>{list.total ? `${first}–${last} of ${list.total}` : 'No messages'}</span>
+          <span>{allMode ? count(list.total, '1 message') + ' found' : list.total ? `${first}–${last} of ${list.total}` : 'No messages'}</span>
           <button type="button" className="icon-btn" aria-label="Next page" disabled={page >= pages || loading} onClick={() => goToPage(page + 1)}>{Icon.chevronRight}</button>
           <button type="button" className="icon-btn" aria-label="Last page" disabled={page >= pages || loading} onClick={() => goToPage(pages)}>{Icon.chevronsRight}</button>
         </footer>
@@ -718,3 +778,4 @@ function Skeleton() {
     </ul>
   );
 }
+
