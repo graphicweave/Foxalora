@@ -60,6 +60,12 @@ export class MailController {
     return this.mail.listMessages(req.mailbox, folder, Number(page), Number(pageSize), q);
   }
 
+  // Before 'messages/:id', so "search" is never read as a message id.
+  @Get('messages/search')
+  searchAll(@Req() req: AuthedRequest, @Query('q') q?: unknown) {
+    return this.mail.searchAllFolders(req.mailbox, q);
+  }
+
   @Get('messages/:id')
   get(@Req() req: AuthedRequest, @Param('id') id: string) {
     return this.mail.getMessage(req.mailbox, id);

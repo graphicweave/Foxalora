@@ -7,6 +7,7 @@ import type { EmailOutput, QuotedOriginal } from '../editor/serialize';
 import { withInlineSignatureImages } from '../editor/signature-images';
 import { useConfirm } from '../ui/confirm-context';
 import { Icon } from '../ui/icons';
+import { usePrefs } from '../ui/prefs-context';
 import { useToast } from '../ui/toast-context';
 import RecipientInput from './RecipientInput';
 
@@ -27,6 +28,14 @@ export interface ComposeInit {
 
 const split = (s: string) => s.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
 const AUTOSAVE_MS = 30_000;
+
+// Mirrors the server's attachment limits (backend/src/mail/attachments.ts).
+const MAX_FILES = 10;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_FILES_TOTAL_BYTES = 20 * 1024 * 1024;
+const fmtSize = (n: number) => (n >= 1024 * 1024 ? `${(n / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+
+interface AttachedFile { id: string; file: File }
 
 /** Same custom button as the composer demo (FOX-051). */
 const insertDate: ToolbarItem = {
@@ -61,12 +70,15 @@ export default function Compose({ init, onClose, onSent, onDraftSaved, signature
 }) {
   const toast = useToast();
   const confirm = useConfirm();
+  const { prefs } = usePrefs();
   const [to, setTo] = useState(init.to ?? '');
   const [cc, setCc] = useState(init.cc ?? '');
   const [bcc, setBcc] = useState(init.bcc ?? '');
   const [showCc, setShowCc] = useState(!!init.cc);
   const [showBcc, setShowBcc] = useState(!!init.bcc);
   const [subject, setSubject] = useState(init.subject ?? '');
+  const [files, setFiles] = useState<AttachedFile[]>([]);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [err, setErr] = useState('');
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<'' | 'saving' | 'saved' | 'failed'>(init.draftId ? 'saved' : '');
@@ -81,8 +93,32 @@ export default function Compose({ init, onClose, onSent, onDraftSaved, signature
   const interacted = useRef(false);
   const saving = useRef<Promise<void> | null>(null);
 
-  const snapshot = () => JSON.stringify([to, cc, bcc, subject, output.current?.html ?? '']);
+  const snapshot = () => JSON.stringify([to, cc, bcc, subject, output.current?.html ?? '', files.map((f) => f.file.name + f.file.size)]);
   const dirty = () => baseline.current !== null && snapshot() !== baseline.current;
+
+  function addFiles(incoming: File[]) {
+    if (!incoming.length) return;
+    interacted.current = true;
+    const next = [...files];
+    let total = next.reduce((s, f) => s + f.file.size, 0);
+    for (const file of incoming) {
+      if (next.length >= MAX_FILES) {
+        toast('error', `A message can have up to ${MAX_FILES} attached files.`);
+        break;
+      }
+      if (file.size > MAX_FILE_BYTES) {
+        toast('error', `“${file.name}” is ${fmtSize(file.size)}. Files can be up to ${fmtSize(MAX_FILE_BYTES)} each.`);
+        continue;
+      }
+      if (total + file.size > MAX_FILES_TOTAL_BYTES) {
+        toast('error', `Attachments can be up to ${fmtSize(MAX_FILES_TOTAL_BYTES)} in total.`);
+        continue;
+      }
+      total += file.size;
+      next.push({ id: crypto.randomUUID(), file });
+    }
+    setFiles(next);
+  }
 
   async function inlineImages(out: EmailOutput) {
     return Promise.all(
@@ -153,6 +189,15 @@ export default function Compose({ init, onClose, onSent, onDraftSaved, signature
       onClose();
       return;
     }
+    if (files.length) {
+      const ok = await confirm({
+        title: 'Attached files are not saved with drafts',
+        message: 'Your text is saved to Drafts, but the attached files are not included yet. Attach them again when you continue.',
+        confirmLabel: 'Close',
+        cancelLabel: 'Keep writing',
+      });
+      if (!ok) return;
+    }
     try {
       await saveDraft();
       toast('success', 'Saved to Drafts. Open the Drafts folder to finish it later.');
@@ -197,7 +242,10 @@ export default function Compose({ init, onClose, onSent, onDraftSaved, signature
     setSending(true);
     try {
       if (saving.current) await saving.current.catch(() => undefined);
-      const res = await api.send({ to: recipients, cc: split(cc), bcc: split(bcc), subject, text: out.text, html: out.html, inlineImages: await inlineImages(out), draftId: draftId.current });
+      const attachments = await Promise.all(
+        files.map(async ({ file }) => ({ filename: file.name, contentType: file.type || 'application/octet-stream', data: await blobToBase64(file) })),
+      );
+      const res = await api.send({ to: recipients, cc: split(cc), bcc: split(bcc), subject, text: out.text, html: out.html, inlineImages: await inlineImages(out), attachments, draftId: draftId.current });
       onSent?.(res.sentCopy);
       onClose();
     } catch (e) {
@@ -206,6 +254,12 @@ export default function Compose({ init, onClose, onSent, onDraftSaved, signature
       setSending(false);
     }
   }
+
+  const attachItem = useMemo<ToolbarItem>(
+    () => ({ id: 'attachFiles', label: `Attach files (up to ${fmtSize(MAX_FILE_BYTES)} each)`, icon: Icon.paperclip, run: () => fileInput.current?.click() }),
+    [],
+  );
+  const toolbar = useMemo(() => [...TOOLBAR, '|', attachItem], [attachItem]);
 
   const statusText = { '': '', saving: 'Saving…', saved: 'Saved to Drafts', failed: 'Not saved' }[status];
   const markInteracted = () => {
@@ -219,9 +273,19 @@ export default function Compose({ init, onClose, onSent, onDraftSaved, signature
         role="dialog"
         aria-modal="true"
         aria-labelledby="compose-title"
+        // Inherited by the subject field and the message body; recipient fields opt out.
+        spellCheck={prefs.spellCheck}
         onKeyDownCapture={markInteracted}
         onPasteCapture={markInteracted}
         onDropCapture={markInteracted}
+        onDragOver={(e) => e.dataTransfer.types.includes('Files') && e.preventDefault()}
+        onDrop={(e) => {
+          // Images dropped into the text are handled by the editor (defaultPrevented);
+          // everything else dropped on the window becomes an attachment.
+          if (e.defaultPrevented || !e.dataTransfer.files.length) return;
+          e.preventDefault();
+          addFiles([...e.dataTransfer.files]);
+        }}
       >
         <header className="compose-head">
           <h3 id="compose-title">{init.title ?? 'New message'}</h3>
@@ -257,11 +321,27 @@ export default function Compose({ init, onClose, onSent, onDraftSaved, signature
         {init.note && <p className="compose-note">{Icon.info}<span>{init.note}</span></p>}
         {err && <div className="error compose-error" role="alert">{err}</div>}
 
+        {files.length > 0 && (
+          <ul className="attach-list" aria-label="Attached files">
+            {files.map((f) => (
+              <li key={f.id} className="attach-chip">
+                {Icon.paperclip}
+                <span className="attach-name" title={f.file.name}>{f.file.name}</span>
+                <span className="attach-size">{fmtSize(f.file.size)}</span>
+                <button type="button" className="ghost icon attach-remove" aria-label={`Remove ${f.file.name}`} onClick={() => setFiles((cur) => cur.filter((x) => x.id !== f.id))}>
+                  {Icon.x}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <input ref={fileInput} type="file" multiple hidden onChange={(e) => { addFiles([...(e.target.files ?? [])]); e.target.value = ''; }} aria-hidden="true" tabIndex={-1} />
+
         <EmailComposer
           initialContent={init.initialHtml}
           quoted={init.quoted}
           images={images}
-          toolbar={TOOLBAR}
+          toolbar={toolbar}
           signatures={composerSignatures}
           // A continued draft already contains its signature.
           defaultSignatureId={init.initialHtml === undefined ? defaultSignatureId : undefined}
@@ -277,3 +357,4 @@ export default function Compose({ init, onClose, onSent, onDraftSaved, signature
     </div>
   );
 }
+
