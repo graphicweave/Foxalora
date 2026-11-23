@@ -71,7 +71,7 @@ After finishing, the setup page answers "not found" for good, with or without th
 
 - Keep the setup link private until setup is done: whoever opens it first sets up the server.
 - Lost the link: `grep SETUP_TOKEN deploy/.env`, then open `https://webmail.yourdomain.com/setup#token=` followed by the value.
-- More servers and domains later (until the admin console exists), with the CLI:
+- More servers and domains later: in the **admin console** (next section), or with the CLI:
 
 ```bash
 ./deploy/cli.sh tenant:list
@@ -96,6 +96,17 @@ Settings for common providers:
 **Zoho: IMAP is off by default for every mailbox.** Until it is turned on, the test connection shows "the server was reached, but the test mailbox could not sign in" while SMTP signs in fine, and users get the generic sign-in failure. The API log shows `login failed (imap_auth:ALERT)`. Each user turns it on in Zoho Mail: Settings → All Settings → Mail Accounts → their address → **IMAP Access**; or a Zoho admin does it under Users → the user → Mail Settings → IMAP/POP Access. Accounts with two-factor login sign in with a Zoho app password.
 
 Why a user cannot sign in: the login page always shows the same generic message (on purpose). The reason is in the API log: `./deploy/compose.sh logs api | grep -i login`.
+
+## 4b. Admin console
+
+`https://webmail.yourdomain.com/admin`, with the administrator email and password from the setup wizard. Mailbox users never see it; it has its own sign-in and session (15 minutes idle, 8 hours at most).
+
+- **Two-step verification is required.** At the first sign-in, scan the QR code with an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password …), enter its 6-digit code, and store the 10 backup codes shown once. Each code works only once; 5 wrong codes lock code entry for 15 minutes.
+- **Domains:** add a customer domain to a mail server, or remove one (its users can no longer sign in).
+- **Mail servers:** add, edit, delete (only when no domain uses it), and test the connection, as in the setup wizard.
+- **Audit log:** filter by event, date and text; export as CSV. Entries never contain passwords or mail content.
+- **Lost phone and backup codes:** on the server, `./deploy/cli.sh admin:reset-2fa admin@yourdomain.com`; the administrator sets up two-step again at the next sign-in.
+- The two-step keys are encrypted with `MASTER_KEYS` in `deploy/.env` (added automatically by `install.sh`). Back it up with the database: without it, every administrator has to set up two-step again.
 
 Sign in at `https://webmail.yourdomain.com` with a mailbox on one of the domains. **Write down how long the install took** (adoption target: 15 minutes).
 

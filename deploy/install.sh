@@ -68,6 +68,8 @@ POSTGRES_PASSWORD=$(openssl rand -hex 24)
 APP_DB_PASSWORD=$(openssl rand -hex 24)
 VALKEY_PASSWORD=$(openssl rand -hex 24)
 VAULT_KEYS=k1:$(openssl rand -base64 32)
+# Encrypts stored secrets such as administrators' two-step verification keys. Back it up with the database.
+MASTER_KEYS=m1:$(openssl rand -base64 32)
 # One-time key for the browser setup wizard (/setup). Useless once setup is done.
 SETUP_TOKEN=$(openssl rand -hex 32)
 SESSION_IDLE_MINUTES=30
@@ -84,6 +86,8 @@ else
   echo "deploy/.env already exists; keeping it."
   # Installs from before the setup wizard: add its token.
   grep -q '^SETUP_TOKEN=' .env || echo "SETUP_TOKEN=$(openssl rand -hex 32)" >> .env
+  # Installs from before the admin console: add the key for stored secrets.
+  grep -q '^MASTER_KEYS=' .env || { echo "MASTER_KEYS=m1:$(openssl rand -base64 32)" >> .env; echo "Added MASTER_KEYS to deploy/.env (back it up)."; }
   # Installs from before the render host: turned on only when asked (it needs DNS and a certificate).
   if grep -q '^RENDER_DOMAIN=' .env; then
     RENDER_DOMAIN=$(sed -n 's/^RENDER_DOMAIN=//p' .env)

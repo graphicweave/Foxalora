@@ -8,6 +8,7 @@ import type { TlsPolicy } from './database/schema';
 import { TenantDb } from './database/tenant-db';
 import { openImap, withSmtp } from './mail/connections';
 import { RegistryService } from './registry/registry.service';
+import { hashAdminPassword } from './setup/admin-password';
 import type { ServerInput } from './registry/server-validation';
 
 const USAGE = `Usage: node dist/cli.js <command>
@@ -21,11 +22,16 @@ const USAGE = `Usage: node dist/cli.js <command>
   server:saves-sent <tenantId> <name> on|off  whether the server keeps its own copy of sent mail (DATABASE_URL)
   domain:map <tenantId> <domain> <serverName>   map an email domain to a server (DATABASE_URL)
   server:list <tenantId>                    show a tenant's servers and domains (DATABASE_URL)
+  admin:reset-2fa <email>                   remove an administrator's two-step verification (lost phone);
+                                            they set it up again at the next sign-in (DATABASE_URL)
   setup:status                              "open" until the setup wizard has created the first administrator (DATABASE_URL)
   seed:dev                                  development tenant for the local test servers (both URLs)
   seed:mail [--force]                       sample messages for carol@ and dave@dovecot.test (DATABASE_URL,
                                             NODE_EXTRA_CA_CERTS=dev/mailservers/certs/ca.pem); skipped if mail exists
 `;
+
+// Development administrator (seed:dev only; refused in production).
+const DEV_ADMIN = { email: 'admin@dev.test', password: 'Dev-Admin-Pass-2026' };
 
 // Test accounts of the local Postfix + Dovecot server (dev/mailservers/postfix-accounts.cf).
 const DEV_MAILBOXES: Record<string, string> = { 'carol@dovecot.test': 'carol-pass-1', 'dave@dovecot.test': 'dave-pass-1' };
@@ -151,6 +157,25 @@ async function main(argv: string[]) {
       await db.destroy();
       return;
     }
+    case 'admin:reset-2fa': {
+      const email = String(args[0] ?? '').trim().toLowerCase();
+      if (!email.includes('@')) throw new Error('usage: admin:reset-2fa <email>');
+      const db = createDb(requireEnv('DATABASE_URL'), 1);
+      const tenantDb = new TenantDb(db);
+      const found = await sql<{ id: string; tenant_id: string }>`SELECT id, tenant_id FROM admin_login_lookup(${email})`.execute(db);
+      const a = found.rows[0];
+      if (!a) {
+        await db.destroy();
+        throw new Error(`no administrator ${email} in an active tenant`);
+      }
+      await tenantDb.run({ tenantId: a.tenant_id }, async (trx) => {
+        await trx.updateTable('admin_users').set({ totp_secret: null, totp_enabled_at: null, backup_codes: '[]', updated_at: new Date() }).where('id', '=', a.id).execute();
+        await new AuditService(tenantDb).insert(trx, a.tenant_id, 'admin.two_step_reset', 'operator (cli)', { admin: email });
+      });
+      await db.destroy();
+      out(`two-step verification removed for ${email}; it is set up again at the next sign-in`);
+      return;
+    }
     case 'setup:status': {
       const db = createDb(requireEnv('DATABASE_URL'), 1);
       const r = await sql<{ open: boolean }>`SELECT setup_is_open() AS open`.execute(db);
@@ -163,6 +188,9 @@ async function main(argv: string[]) {
       const owner = createDb(requireEnv('DATABASE_OWNER_URL'), 1);
       const existing = await owner.selectFrom('tenants').select('id').where('name', '=', 'Development').executeTakeFirst();
       const tenantId = existing?.id ?? (await owner.insertInto('tenants').values({ name: 'Development' }).returning('id').executeTakeFirstOrThrow()).id;
+      // Development administrator for the admin console at /admin (two-step is set up at first sign-in).
+      const devAdmin = await owner.selectFrom('admin_users').select('id').where('email', '=', DEV_ADMIN.email).executeTakeFirst();
+      if (!devAdmin) await owner.insertInto('admin_users').values({ tenant_id: tenantId, email: DEV_ADMIN.email, password_hash: await hashAdminPassword(DEV_ADMIN.password), role: 'owner' }).execute();
       await owner.destroy();
       const { db, reg } = registry();
       const have = new Set((await reg.listServers(tenantId)).servers.map((s) => s.name));
@@ -178,7 +206,7 @@ async function main(argv: string[]) {
         if (!mapped.has(domain)) await reg.mapDomain(tenantId, domain, server, ACTOR);
       }
       await db.destroy();
-      out(`development tenant ${tenantId} ready (example.com, dovecot.test, exim.test)`);
+      out(`development tenant ${tenantId} ready (example.com, dovecot.test, exim.test); admin console: ${DEV_ADMIN.email} / ${DEV_ADMIN.password}`);
       return;
     }
     case 'seed:mail': {

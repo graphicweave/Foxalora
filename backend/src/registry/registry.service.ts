@@ -31,6 +31,13 @@ const toServer = (r: ServerRow): MailServer => ({
   savesSent: r.saves_sent === true, // not returned by the login lookup, which does not need it
 });
 
+export class NotFoundError extends Error {}
+
+const uniqueName = (e: unknown): never => {
+  if ((e as { code?: string })?.code === '23505') throw new ServerValidationError('Another server already has that name.');
+  throw e;
+};
+
 const DOMAIN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 
 /** Lower-cased email domain, or ServerValidationError. */
@@ -111,6 +118,58 @@ export class RegistryService {
   async insertDomain(trx: Transaction<Database>, tenantId: string, domain: string, server: { id: string; name: string }, actor: string) {
     await trx.insertInto('domain_mappings').values({ tenant_id: tenantId, domain, mail_server_id: server.id }).execute();
     await this.audit.insert(trx, tenantId, 'registry.domain_mapped', actor, { domain, server: server.name });
+  }
+
+  /** Changes a server's settings. `s` must come from validateServerInput. */
+  async updateServer(tenantId: string, serverId: string, s: ServerInput, actor: string): Promise<void> {
+    await this.tenantDb.run({ tenantId }, async (trx) => {
+      const r = await trx.updateTable('mail_servers').set({
+        name: s.name, imap_host: s.imapHost, imap_port: s.imapPort, imap_tls: s.imapTls,
+        smtp_host: s.smtpHost, smtp_port: s.smtpPort, smtp_tls: s.smtpTls, allow_private: s.allowPrivate,
+        saves_sent: s.savesSent === true, updated_at: new Date(),
+      }).where('id', '=', serverId).returning('id').executeTakeFirst().catch(uniqueName);
+      if (!r) throw new NotFoundError('server not found');
+      await this.audit.insert(trx, tenantId, 'registry.server_updated', actor, {
+        server: s.name, imap: `${s.imapHost}:${s.imapPort}/${s.imapTls}`, smtp: `${s.smtpHost}:${s.smtpPort}/${s.smtpTls}`, allowPrivate: s.allowPrivate, savesSent: s.savesSent === true,
+      });
+    });
+  }
+
+  /** Deletes a server that no domain uses any more (mailbox sessions on it end at their next request). */
+  async deleteServer(tenantId: string, serverId: string, actor: string): Promise<void> {
+    await this.tenantDb.run({ tenantId }, async (trx) => {
+      const server = await trx.selectFrom('mail_servers').select('name').where('id', '=', serverId).executeTakeFirst();
+      if (!server) throw new NotFoundError('server not found');
+      const used = await trx.selectFrom('domain_mappings').select('domain').where('mail_server_id', '=', serverId).execute();
+      if (used.length) throw new ServerValidationError(`Remove its domains first: ${used.map((d) => d.domain).slice(0, 5).join(', ')}${used.length > 5 ? ', …' : ''}.`);
+      await trx.deleteFrom('mail_servers').where('id', '=', serverId).execute();
+      await this.audit.insert(trx, tenantId, 'registry.server_deleted', actor, { server: server.name });
+    });
+  }
+
+  /** Maps a domain to a server of this tenant, chosen by id (admin console). */
+  async mapDomainToServer(tenantId: string, domainInput: unknown, serverId: string, actor: string): Promise<string> {
+    const domain = normalizeDomain(domainInput);
+    await this.tenantDb.run({ tenantId }, async (trx) => {
+      const server = await trx.selectFrom('mail_servers').select(['id', 'name']).where('id', '=', serverId).executeTakeFirst();
+      if (!server) throw new NotFoundError('server not found');
+      await this.insertDomain(trx, tenantId, domain, server, actor).catch((e) => {
+        // Domains are unique across the installation; do not reveal which tenant holds one.
+        if ((e as { code?: string })?.code === '23505') throw new ServerValidationError(`The domain ${domain} cannot be added: it is already in use.`);
+        throw e;
+      });
+    });
+    return domain;
+  }
+
+  /** Removes a domain: its users can no longer sign in (sessions already open end when they expire). */
+  async unmapDomain(tenantId: string, domainInput: unknown, actor: string): Promise<void> {
+    const domain = normalizeDomain(domainInput);
+    await this.tenantDb.run({ tenantId }, async (trx) => {
+      const r = await trx.deleteFrom('domain_mappings').where('domain', '=', domain).returning('mail_server_id').executeTakeFirst();
+      if (!r) throw new NotFoundError('domain not found');
+      await this.audit.insert(trx, tenantId, 'registry.domain_unmapped', actor, { domain });
+    });
   }
 
   async listServers(tenantId: string) {

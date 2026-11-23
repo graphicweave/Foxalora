@@ -38,6 +38,8 @@ services:
       DATABASE_URL: postgres://foxalora_app:${APP_DB_PASSWORD:?}@postgres:5432/foxalora
       VALKEY_URL: redis://:${VALKEY_PASSWORD:?}@valkey:6379
       FOXALORA_VAULT_KEYS: ${VAULT_KEYS:?}
+      # Envelope key for stored secrets (admin two-step keys). Losing it means re-enrolling two-step.
+      FOXALORA_MASTER_KEYS: ${MASTER_KEYS:-}
       ALLOWED_HOSTS: ${DOMAIN}
       # FOX-045: email bodies are served from this second host name (empty: sandboxed frame on the app origin).
       FOXALORA_RENDER_DOMAIN: ${RENDER_DOMAIN:-}

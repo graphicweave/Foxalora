@@ -1,6 +1,11 @@
 import { Inject, Module, type OnApplicationShutdown } from '@nestjs/common';
 import { Redis } from 'ioredis';
 import type { Kysely } from 'kysely';
+import { AdminAuthController } from './admin/admin-auth.controller';
+import { AdminAuthService } from './admin/admin-auth.service';
+import { AdminSessionService } from './admin/admin-session.service';
+import { AdminController } from './admin/admin.controller';
+import { AdminGuard } from './admin/admin.guard';
 import { AuditService } from './audit/audit.service';
 import { AuthController } from './auth/auth.controller';
 import { AuthGuard } from './auth/auth.guard';
@@ -49,7 +54,7 @@ class Shutdown implements OnApplicationShutdown {
 }
 
 @Module({
-  controllers: [AuthController, MailController, ContactsController, PreferencesController, SetupController, RenderController],
+  controllers: [AuthController, MailController, ContactsController, PreferencesController, SetupController, RenderController, AdminAuthController, AdminController],
   providers: [
     // Runtime role (foxalora_app): always subject to row-level security.
     { provide: DB, useFactory: () => createDb(requireEnv('DATABASE_URL')) },
@@ -67,6 +72,9 @@ class Shutdown implements OnApplicationShutdown {
     PreferencesService,
     SetupService,
     RenderService,
+    AdminSessionService,
+    AdminAuthService,
+    AdminGuard,
     Shutdown,
   ],
 })
