@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put, Query, Req, 
 import type { Response } from 'express';
 import { AuthedRequest, AuthGuard } from '../auth/auth.guard';
 import { ContactsService, type Owner } from './contacts.service';
+import { GroupsService } from './groups.service';
 import { RecipientsService } from './recipients.service';
 
 const owner = (req: AuthedRequest): Owner => ({ tenantId: req.mailbox.tenantId, email: req.mailbox.email });
@@ -12,18 +13,57 @@ const owner = (req: AuthedRequest): Owner => ({ tenantId: req.mailbox.tenantId, 
 export class ContactsController {
   constructor(
     private readonly contacts: ContactsService,
+    private readonly groups: GroupsService,
     private readonly recipients: RecipientsService,
   ) {}
 
   @Get()
-  list(@Req() req: AuthedRequest, @Query('q') q?: unknown, @Query('page') page?: unknown) {
-    return this.contacts.list(owner(req), q, page);
+  list(@Req() req: AuthedRequest, @Query('q') q?: unknown, @Query('page') page?: unknown, @Query('group') group?: unknown) {
+    return this.contacts.list(owner(req), q, page, group);
   }
 
   // Fixed paths are declared before ':id'.
   @Get('suggest')
   suggest(@Req() req: AuthedRequest, @Query('q') q?: unknown) {
     return this.contacts.suggest(owner(req), q);
+  }
+
+  @Get('groups')
+  listGroups(@Req() req: AuthedRequest) {
+    return this.groups.list(owner(req));
+  }
+
+  @Post('groups')
+  createGroup(@Req() req: AuthedRequest, @Body() body: unknown) {
+    return this.groups.create(owner(req), body);
+  }
+
+  @Put('groups/:id')
+  renameGroup(@Req() req: AuthedRequest, @Param('id') id: string, @Body() body: unknown) {
+    return this.groups.rename(owner(req), id, body);
+  }
+
+  @Delete('groups/:id')
+  @HttpCode(204)
+  async removeGroup(@Req() req: AuthedRequest, @Param('id') id: string) {
+    await this.groups.remove(owner(req), id);
+  }
+
+  @Get('groups/:id/addresses')
+  groupAddresses(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.groups.addresses(owner(req), id);
+  }
+
+  @Post('groups/:id/members')
+  @HttpCode(204)
+  async addGroupMember(@Req() req: AuthedRequest, @Param('id') id: string, @Body() body: unknown) {
+    await this.groups.addMember(owner(req), id, body);
+  }
+
+  @Delete('groups/:id/members/:contactId')
+  @HttpCode(204)
+  async removeGroupMember(@Req() req: AuthedRequest, @Param('id') id: string, @Param('contactId') contactId: string) {
+    await this.groups.removeMember(owner(req), id, contactId);
   }
 
   @Get('export')
@@ -46,6 +86,12 @@ export class ContactsController {
   @HttpCode(200)
   import(@Req() req: AuthedRequest, @Body() body: unknown) {
     return this.contacts.importVCard(owner(req), body);
+  }
+
+  @Post('import-csv')
+  @HttpCode(200)
+  importCsv(@Req() req: AuthedRequest, @Body() body: unknown) {
+    return this.contacts.importCsv(owner(req), body);
   }
 
   @Post()

@@ -27,7 +27,8 @@ export const PAGE_SIZE = 25;
 
 export interface ContactEmail { email: string; label: '' | 'work' | 'home' | 'other' | string }
 export interface ContactDraft { displayName: string; company: string; phone: string; emails: ContactEmail[] }
-export interface Contact extends ContactDraft { id: string }
+export interface Contact extends ContactDraft { id: string; groups?: { id: string; name: string }[] }
+export interface ContactGroup { id: string; name: string; members: number }
 export interface Suggestion { name: string; email: string; source: 'contact' | 'recent' }
 export interface Preferences {
   displayName: string; theme: 'system' | 'light' | 'dark'; density: 'comfortable' | 'compact'; timeZone: string;
@@ -94,13 +95,25 @@ export const api = {
   saveDraft: (m: OutgoingMessage & { replaceId?: string }) => call<{ id: string }>('POST', '/drafts', m),
   deleteDraft: (id: string) => call<void>('DELETE', `/drafts/${encodeURIComponent(id)}`),
   clearRecent: () => call<void>('DELETE', '/contacts/recent'),
-  contacts: (search: string, page: number) => call<{ items: Contact[]; total: number }>('GET', `/contacts${q({ page, ...(search ? { q: search } : {}) })}`),
+  contacts: (search: string, page: number, group?: string | null) =>
+    call<{ items: Contact[]; total: number }>('GET', `/contacts${q({ page, ...(search ? { q: search } : {}), ...(group ? { group } : {}) })}`),
+  contact: (id: string) => call<Contact>('GET', `/contacts/${encodeURIComponent(id)}`),
   suggest: (text: string) => call<Suggestion[]>('GET', `/contacts/suggest${q({ q: text })}`),
+  groups: () => call<{ items: ContactGroup[] }>('GET', '/contacts/groups'),
+  createGroup: (name: string) => call<ContactGroup>('POST', '/contacts/groups', { name }),
+  renameGroup: (id: string, name: string) => call<{ id: string; name: string }>('PUT', `/contacts/groups/${encodeURIComponent(id)}`, { name }),
+  deleteGroup: (id: string) => call<void>('DELETE', `/contacts/groups/${encodeURIComponent(id)}`),
+  addToGroup: (groupId: string, contactId: string) => call<void>('POST', `/contacts/groups/${encodeURIComponent(groupId)}/members`, { contactId }),
+  removeFromGroup: (groupId: string, contactId: string) =>
+    call<void>('DELETE', `/contacts/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(contactId)}`),
+  groupAddresses: (id: string) => call<{ emails: string[] }>('GET', `/contacts/groups/${encodeURIComponent(id)}/addresses`),
   createContact: (c: ContactDraft) => call<Contact>('POST', '/contacts', c),
   updateContact: (id: string, c: ContactDraft) => call<Contact>('PUT', `/contacts/${encodeURIComponent(id)}`, c),
   deleteContact: (id: string) => call<void>('DELETE', `/contacts/${encodeURIComponent(id)}`),
   importContacts: (vcard: string, duplicates: 'skip' | 'add') =>
     call<{ imported: number; skipped: number; errors: string[] }>('POST', '/contacts/import', { vcard, duplicates }),
+  importContactsCsv: (csv: string, mapping: { email: number[] } & Partial<Record<'name' | 'firstName' | 'lastName' | 'phone' | 'company', number>>, hasHeader: boolean, duplicates: 'skip' | 'add') =>
+    call<{ imported: number; skipped: number; errors: string[] }>('POST', '/contacts/import-csv', { csv, mapping, hasHeader, duplicates }),
   exportContactsUrl: (ids?: string[]) => `/api/v1/contacts/export${ids?.length ? q({ ids: ids.join(',') }) : ''}`,
   preferences: () => call<Preferences>('GET', '/preferences'),
   savePreferences: (p: Partial<Preferences>) => call<Preferences>('PATCH', '/preferences', p),
@@ -111,4 +124,5 @@ export const api = {
   deleteSignature: (id: string) => call<void>('DELETE', `/signatures/${encodeURIComponent(id)}`),
   attachmentUrl: (id: string, part: string) =>
     `/api/v1/messages/${encodeURIComponent(id)}/attachments/${encodeURIComponent(part)}`,
+  rawMessageUrl: (id: string) => `/api/v1/messages/${encodeURIComponent(id)}/raw`,
 };

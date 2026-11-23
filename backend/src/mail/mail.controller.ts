@@ -12,6 +12,16 @@ import { MailService } from './mail.service';
  */
 const owner = (req: AuthedRequest) => ({ tenantId: req.mailbox.tenantId, email: req.mailbox.email });
 
+/** Download headers (rule 11): force download + generic type, never render/execute. */
+function forcedDownload(res: Response, filename: string): Response {
+  const ascii = filename.replace(/[^\w.\- ]+/g, '_');
+  res.setHeader('Content-Type', 'application/octet-stream');
+  res.setHeader('Content-Disposition', `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+  return res;
+}
+
 @Controller()
 @UseGuards(AuthGuard)
 export class MailController {
@@ -73,15 +83,13 @@ export class MailController {
 
   @Get('messages/:id/attachments/:part')
   async attachment(@Req() req: AuthedRequest, @Param('id') id: string, @Param('part') part: string, @Res() res: Response) {
-    await this.mail.streamAttachment(req.mailbox, id, part, (filename) => {
-      // Always force download + generic type: never let the browser render/execute it.
-      const ascii = filename.replace(/[^\w.\- ]+/g, '_');
-      res.setHeader('Content-Type', 'application/octet-stream');
-      res.setHeader('Content-Disposition', `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-      res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
-      return res;
-    });
+    await this.mail.streamAttachment(req.mailbox, id, part, (filename) => forcedDownload(res, filename));
+  }
+
+  /** The complete message source as a .eml file (D-014). */
+  @Get('messages/:id/raw')
+  async raw(@Req() req: AuthedRequest, @Param('id') id: string, @Res() res: Response) {
+    await this.mail.streamRaw(req.mailbox, id, (filename) => forcedDownload(res, filename));
   }
 
   @Patch('messages/:id')

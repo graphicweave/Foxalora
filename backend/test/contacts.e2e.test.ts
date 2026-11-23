@@ -154,6 +154,69 @@ describe.skipIf(!hasPg || !VALKEY)('contacts, preferences and signatures over HT
     expect((await adam('GET', '/contacts/export')).text).toBe('');
   });
 
+  it('imports CSV with a column mapping, keeping valid rows and listing bad ones (FOX-074)', async () => {
+    const csv = 'First,Last,Work Email\nGrace,Hopper,grace@x.test\nDup,Licate,erin@x.test\nBad,Row,not-an-email';
+    const r = await alice('POST', '/contacts/import-csv', {
+      csv,
+      mapping: { firstName: 0, lastName: 1, email: [2] },
+      duplicates: 'skip',
+    });
+    expect(r.status).toBe(200);
+    expect(r.json).toEqual({ imported: 1, skipped: 1, errors: [expect.stringMatching(/^Row 4/)] });
+    const list = await alice('GET', '/contacts?q=Grace');
+    expect(list.json.items).toHaveLength(1);
+    expect(list.json.items[0].emails).toEqual([{ email: 'grace@x.test', label: 'work' }]);
+    // The other mailbox sees nothing from this import.
+    expect((await adam('GET', '/contacts?q=Grace')).json.total).toBe(0);
+    // Bad mapping is a 400, not a crash.
+    expect((await alice('POST', '/contacts/import-csv', { csv, mapping: { phone: 0 } })).status).toBe(400);
+  });
+
+  it('manages groups and keeps them apart between mailboxes (D-014)', async () => {
+    const g = await alice('POST', '/contacts/groups', { name: 'Team' });
+    expect(g.status).toBe(201);
+    const gid = g.json.id;
+    // Case-insensitive duplicate names are refused; renames validate the same way.
+    expect((await alice('POST', '/contacts/groups', { name: 'team' })).status).toBe(400);
+    expect((await alice('POST', '/contacts/groups', { name: '' })).status).toBe(400);
+    expect((await alice('PUT', `/contacts/groups/${gid}`, { name: 'Core team' })).json.name).toBe('Core team');
+
+    const a = (await alice('POST', '/contacts', { displayName: 'Member A', emails: ['member-a@x.test'] })).json;
+    const b = (await alice('POST', '/contacts', { displayName: 'Member B', emails: ['member-b@x.test', 'second@x.test'] })).json;
+    expect((await alice('POST', `/contacts/groups/${gid}/members`, { contactId: a.id })).status).toBe(204);
+    expect((await alice('POST', `/contacts/groups/${gid}/members`, { contactId: a.id })).status).toBe(204); // idempotent
+    expect((await alice('POST', `/contacts/groups/${gid}/members`, { contactId: b.id })).status).toBe(204);
+
+    expect((await alice('GET', '/contacts/groups')).json.items).toEqual([{ id: gid, name: 'Core team', members: 2 }]);
+    const filtered = await alice('GET', `/contacts?group=${gid}`);
+    expect(filtered.json.items.map((c: any) => c.displayName).sort()).toEqual(['Member A', 'Member B']);
+    expect((await alice('GET', `/contacts/${a.id}`)).json.groups).toEqual([{ id: gid, name: 'Core team' }]);
+    expect((await alice('GET', `/contacts/groups/${gid}/addresses`)).json.emails.sort()).toEqual(['member-a@x.test', 'member-b@x.test']);
+
+    // Another mailbox in the same tenant sees nothing and cannot plant members.
+    expect((await adam('GET', '/contacts/groups')).json.items).toEqual([]);
+    expect((await adam('GET', `/contacts?group=${gid}`)).json.total).toBe(0);
+    expect((await adam('PUT', `/contacts/groups/${gid}`, { name: 'Mine now' })).status).toBe(404);
+    expect((await adam('DELETE', `/contacts/groups/${gid}`)).status).toBe(404);
+    expect((await adam('POST', `/contacts/groups/${gid}/members`, { contactId: a.id })).status).toBe(404);
+    expect((await adam('GET', `/contacts/groups/${gid}/addresses`)).status).toBe(404);
+    // Alice cannot add another mailbox's contact to her group either.
+    const adams = (await adam('POST', '/contacts', { displayName: 'Not yours', emails: ['notyours@x.test'] })).json;
+    expect((await alice('POST', `/contacts/groups/${gid}/members`, { contactId: adams.id })).status).toBe(404);
+
+    // Removing a member and deleting the group: membership goes, contacts stay.
+    expect((await alice('DELETE', `/contacts/groups/${gid}/members/${b.id}`)).status).toBe(204);
+    expect((await alice('GET', '/contacts/groups')).json.items[0].members).toBe(1);
+    expect((await alice('DELETE', `/contacts/groups/${gid}`)).status).toBe(204);
+    expect((await alice('GET', '/contacts/groups')).json.items).toEqual([]);
+    expect((await alice('GET', `/contacts/${a.id}`)).status).toBe(200);
+    // Deleting a contact clears its memberships through the FK cascade.
+    const g2 = (await alice('POST', '/contacts/groups', { name: 'Cascade' })).json;
+    await alice('POST', `/contacts/groups/${g2.id}/members`, { contactId: a.id });
+    await alice('DELETE', `/contacts/${a.id}`);
+    expect((await alice('GET', '/contacts/groups')).json.items[0].members).toBe(0);
+  });
+
   it('stores preferences per mailbox, validates them and uses the display name when sending', async () => {
     expect((await alice('GET', '/preferences')).json).toEqual({ displayName: '', theme: 'system', density: 'comfortable', timeZone: 'auto', rememberRecipients: true, spellCheck: true, onboarded: false });
     expect((await alice('PATCH', '/preferences', { displayName: 'Alice A', theme: 'dark' })).json.theme).toBe('dark');
