@@ -3,6 +3,7 @@ import type { Response } from 'express';
 import { AuthedRequest, AuthGuard } from '../auth/auth.guard';
 import { RecipientsService } from '../contacts/recipients.service';
 import { PreferencesService } from '../preferences/preferences.service';
+import { RenderService } from '../render/render.service';
 import { MailService } from './mail.service';
 
 /**
@@ -31,6 +32,7 @@ export class MailController {
     private mail: MailService,
     private prefs: PreferencesService,
     private recipients: RecipientsService,
+    private render: RenderService,
   ) {}
 
   @Get('mailboxes')
@@ -77,8 +79,12 @@ export class MailController {
   }
 
   @Get('messages/:id')
-  get(@Req() req: AuthedRequest, @Param('id') id: string) {
-    return this.mail.getMessage(req.mailbox, id);
+  async get(@Req() req: AuthedRequest, @Param('id') id: string) {
+    const msg = await this.mail.getMessage(req.mailbox, id);
+    // FOX-045: the UI shows the body from the separate render origin. `html` stays in the
+    // response for quoting in replies; the editor parses it inertly and never renders it.
+    if (msg.html && this.render.enabled) return { ...msg, renderUrl: await this.render.issue(msg.id, msg.html) };
+    return msg;
   }
 
   @Get('messages/:id/attachments/:part')

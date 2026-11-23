@@ -20,6 +20,10 @@ export interface SearchAllResult { items: (MessageSummary & { folder: string })[
 export interface MessageFull {
   id: string; subject: string; from: Addr[]; to: Addr[]; cc: Addr[]; bcc?: Addr[]; date: string | null;
   text: string; html: string | null;
+  /** One-time link to the body on the separate render origin (FOX-045); absent when not set up. */
+  renderUrl?: string;
+  /** The HTML was too large or deeply nested to clean safely, so only text is shown. */
+  htmlTooComplex?: boolean;
   attachments: { part: string; filename: string; size: number; contentType: string; inline: boolean }[];
 }
 

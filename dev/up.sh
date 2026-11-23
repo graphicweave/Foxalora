@@ -139,7 +139,9 @@ step "Starting API and web app (Ctrl+C stops both)"
 # Job control gives each server its own process group, so stopping kills the whole tree
 # (npm -> nest/vite -> node) and nothing else.
 set -m
-(cd "$ROOT/backend" && exec npm run start:dev </dev/null) & API_PID=$!
+# FOX-045: email bodies load from a separate origin (127.0.0.1:3000) while the app runs on localhost:5173.
+(cd "$ROOT/backend" && FOXALORA_RENDER_ORIGIN="${FOXALORA_RENDER_ORIGIN:-http://127.0.0.1:3000}" \
+  FOXALORA_APP_ORIGIN="${FOXALORA_APP_ORIGIN:-http://localhost:5173}" exec npm run start:dev </dev/null) & API_PID=$!
 (cd "$ROOT/frontend" && exec npm run dev </dev/null) & WEB_PID=$!
 set +m
 stop_servers() { kill -TERM -- "-$API_PID" "-$WEB_PID" 2>/dev/null || true; }

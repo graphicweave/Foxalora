@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import type { FetchMessageObject, ImapFlow, MessageAddressObject, MessageStructureObject } from 'imapflow';
 import type { Readable } from 'node:stream';
 import { safeFilename } from '../security/filename';
-import { sanitizeEmailHtml } from '../security/sanitize';
+import { htmlToRoughText, isHtmlTooComplex, sanitizeEmailHtml } from '../security/sanitize';
 import { CID_LIMITS, inlineCidImages } from './cid-images';
 import { MailboxCreds, openImap, withSmtp } from './connections';
 import { decodePart } from './decode-part';
@@ -433,9 +433,12 @@ export class MailService {
       const textBody = await read(text);
       const htmlBody = await read(html);
 
+      // Markup that would block the server while sanitizing is shown as plain text instead.
+      const htmlTooComplex = !!htmlBody && isHtmlTooComplex(htmlBody.text);
       // Referenced cid: images become data: URIs in the HTML (FOX-048); refused or
-      // unreferenced parts stay in the attachment list.
-      let htmlText = htmlBody?.text ?? null;
+      // unreferenced parts stay in the attachment list. Skipped when the HTML will
+      // not be shown anyway (too complex): no fetches for an unused body.
+      let htmlText = !htmlTooComplex ? htmlBody?.text ?? null : null;
       let inlined = new Set<string>();
       if (htmlText && attachments.some((a) => a.contentId)) {
         const r = await inlineCidImages(htmlText, attachments, async (p) => {
@@ -448,6 +451,7 @@ export class MailService {
       await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
 
       const env = msg.envelope;
+      const bodyText = textBody?.text || (htmlTooComplex ? htmlToRoughText(htmlBody!.text) : '');
       return {
         id: encodeMessageId(ref.folder, ref.uidValidity, ref.uid),
         subject: env?.subject ?? '(no subject)',
@@ -460,9 +464,10 @@ export class MailService {
         messageId: env?.messageId ?? null,
         inReplyTo: env?.inReplyTo ?? null,
         flagged: msg.flags?.has('\\Flagged') ?? false,
-        text: textBody?.text ?? '',
+        text: bodyText,
         // Untrusted: sanitized here, then rendered in a sandboxed iframe by the UI.
         html: htmlText !== null ? sanitizeEmailHtml(htmlText) : null,
+        htmlTooComplex,
         truncated: !!(textBody?.truncated || htmlBody?.truncated),
         attachments: attachments
           .filter((a) => !inlined.has(a.part))

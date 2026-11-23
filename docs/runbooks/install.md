@@ -9,12 +9,12 @@ Foxalora does not host mail. It connects to mail servers you already have (a hos
 - A Linux server (Ubuntu 24.04 and 26.04 tested; any distribution with Docker works), 1 to 2 CPU and 4 GB RAM recommended (2 GB works but the first build is tight), 30 GB disk, x86-64 or ARM64.
 - **Fast storage.** The first install builds Docker images, which is disk-heavy. On a throttled disk it can take hours or freeze the server: on AceCloud, "NVME General purpose" storage made a fresh server unusable, while "NVMe based High IOPS Storage" installed in minutes. Pick SSD/NVMe with normal or high IOPS.
 - Docker Engine with the Compose v2 plugin.
-- A domain name, e.g. `webmail.yourdomain.com`, whose DNS A record points at the server. A free DuckDNS subdomain also works.
+- Two host names pointing at the server (DNS A records): the webmail, e.g. `webmail.yourdomain.com`, and a second one that shows email content, by default `content.webmail.yourdomain.com`. Incoming email is shown from that second address so that a malicious message can never run on the webmail's own address or reach its cookies (CLAUDE.md rule 5). Another name: `RENDER_DOMAIN=name ./deploy/install.sh ...`.
 - Ports 80 and 443 open to the internet (80 is needed for Let's Encrypt).
 
 **Cloud firewall:** allow inbound TCP 22, 80 and 443 in the provider's security group or firewall (create a new group rather than editing a shared `default` one). Outbound must allow the mail ports (993, 465/587) so Foxalora can reach your mail server.
 
-**DNS on Cloudflare:** set the record to **DNS only** (grey cloud) so Let's Encrypt can reach the server directly.
+**DNS on Cloudflare:** set both records to **DNS only** (grey cloud) so Let's Encrypt can reach the server directly.
 
 **Free option:** Oracle Cloud "Always Free" ARM instance (Ampere A1, up to 4 OCPU / 24 GB). Open ports 80 and 443 in both the VCN security list and the instance firewall. Free offers change; check the current terms when signing up.
 
@@ -49,7 +49,7 @@ cd /opt/foxalora
 ./deploy/install.sh webmail.yourdomain.com --letsencrypt
 ```
 
-The installer generates `deploy/.env` with random secrets, gets the certificate, builds the images (a few minutes on the first run), starts Nginx, the API, PostgreSQL and Valkey, runs migrations, and prints a **setup link**:
+The installer generates `deploy/.env` with random secrets (and `RENDER_DOMAIN`), gets one certificate for both host names, builds the images (a few minutes on the first run), starts Nginx, the API, PostgreSQL and Valkey, runs migrations, and prints a **setup link**:
 
 ```
 https://webmail.yourdomain.com/setup#token=<64 hex characters>
@@ -107,6 +107,18 @@ sudo /opt/foxalora/deploy/renew-cert.sh && echo "renewal works"
 ```
 
 Automatic deploys from GitHub on every push: `docs/runbooks/auto-deploy.md`.
+
+### Turning on the content address for an install from before it existed
+
+Installs made before 2026-11-23 show email content in a sandboxed frame on the webmail address itself; the API log and the setup checks say so. To switch:
+
+1. Add a DNS A record `content.webmail.yourdomain.com` pointing at the server (Cloudflare: DNS only) and wait until it resolves.
+2. Re-run the installer with the new name; with Let's Encrypt it extends the certificate to cover both names:
+   ```bash
+   RENDER_DOMAIN=content.webmail.yourdomain.com ./deploy/install.sh webmail.yourdomain.com --letsencrypt
+   ```
+   With your own certificate, put one that covers both names in `deploy/certs/` first and leave out `--letsencrypt`.
+3. Open a message: its body now loads from `https://content.webmail.yourdomain.com/api/v1/render/...`. Check from your machine: `curl -sI https://content.webmail.yourdomain.com/` answers 404 (it serves nothing else).
 
 ## 5. Test server for testers
 
@@ -177,5 +189,7 @@ Setup wizard (2026-11-16), on a fresh production-mode stack with plain `docker` 
 Fresh-server install (2026-11-17), following sections 2 to 4a on a clean Ubuntu 24.04 machine (a privileged container with its own Docker data disk, so Docker runs as on a real server, but no systemd and no public DNS): `get.docker.com` installed Docker with Compose 98 s after start; `./deploy/install.sh webmail.foxalora.test --self-signed` generated the secrets and certificate, built both images, ran migrations, waited for a healthy API and printed the setup link; **bare machine to setup link: 178 s**. The wizard, opened at the real host name, showed all six checks green, the connection test first failed SMTP with "same server" ticked and offered smtp.gmail.com, then passed both; finishing saved tenant, owner, server (with "saves sent mail itself"), domain and audit, and the setup routes then answered 404. HTTP redirects to HTTPS, an unknown host name is refused, a Gmail login with a wrong password reaches Gmail and gets the generic failure; no admin password, setup token or mailbox password in the API log. `install.sh` needs a host name with a dot (`localhost` is refused).
 
 Real server on the internet (2026-11-18), AceCloud Mumbai, 1 vCPU / 4 GB, NVMe High IOPS disk, Ubuntu 26.04, Cloudflare DNS (DNS only), Zoho Mail: Docker installed in 62 s; Let's Encrypt certificate issued (without an email address, the command `--letsencrypt` alone now runs); `install.sh` built, migrated and printed the setup link; **bare server to setup link about 6.5 minutes**. The wizard's connection test against `imappro.zoho.in:993` and `smtppro.zoho.in:465` with a real mailbox first failed IMAP (Zoho had IMAP off for the mailbox) while SMTP signed in, then passed both once IMAP Access was on. Sign-in, receiving mail from Gmail, sending to Gmail and the sent copy in Sent all worked. A second employee's sign-in failed with `imap_auth:ALERT` for the same Zoho reason. Renewal: `renew-cert.sh` as root, and a Let's Encrypt `renew --dry-run` through the running Nginx succeeded; in a normal user's crontab it failed (root-owned certificate folder), now documented. A first attempt on a server with "NVME General purpose" storage stalled at `apt-get update` with the disk 99% busy and the server stopped answering. Automatic deploys from GitHub (`auto-deploy.md`) deployed a commit in about 1 minute, keeping PostgreSQL and Valkey running.
+
+Separate render origin (FOX-045, 2026-11-23), on the dev stack: 11 new backend tests (one-time and expiring links, content stored encrypted under a hash of the token, strict policy, no cookies, each host serves only its own routes) and a headless-Chrome check, `node dev/checks/render-isolation.mjs`, against the real app: the frame loads from the other origin in its own browser process, has an opaque origin, and code running inside it cannot read cookies, localStorage, sessionStorage, IndexedDB, the parent page or its storage (all SecurityError); the link works once; no cookie is set for the render host (15/15 checks). The Nginx template was checked with `nginx -t` in the production image with and without a render domain.
 
 Not yet tested: `enable.sh`, `tester.sh` and `gate.sh` with `docker compose` end to end, an ARM64 build, a real certificate renewal at expiry (only the dry run), a cPanel or Plesk mail server.

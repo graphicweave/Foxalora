@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { BadRequestException } from '@nestjs/common';
 import MailComposer from 'nodemailer/lib/mail-composer';
 import { EMAIL_RE } from '../common/email';
-import { sanitizeEmailHtml } from '../security/sanitize';
+import { isHtmlTooComplex, sanitizeEmailHtml } from '../security/sanitize';
 import { validateAttachments, type OutgoingAttachment } from './attachments';
 import { validateInlineImages } from './inline-images';
 
@@ -40,6 +40,10 @@ export function parseOutgoing(m: OutgoingInput, mode: 'send' | 'draft'): Outgoin
   if (typeof subject !== 'string' || subject.length > 998 || /[\r\n]/.test(subject)) {
     throw new BadRequestException('invalid subject'); // header-injection guard
   }
+  if (typeof m.html === 'string' && isHtmlTooComplex(m.html)) {
+    throw new BadRequestException('The formatting of this message is too large or too complex. Simplify it or send it as plain text.');
+  }
+  if (m.text !== undefined && (typeof m.text !== 'string' || m.text.length > MAX_TEXT_CHARS)) throw new BadRequestException('message text too long');
   const html = typeof m.html === 'string' && m.html ? sanitizeEmailHtml(m.html) : undefined;
   // Inline images from the editor (cid:), validated by sniffed type and size (rule 11).
   const attachments = validateInlineImages(m.inlineImages, html ?? '');
@@ -65,6 +69,8 @@ function compose(address: string, name: string | undefined, d: Outgoing, message
   return node.build();
 }
 
+/** Plain-text body limit for sending and drafts (1 MB of characters). */
+const MAX_TEXT_CHARS = 1_000_000;
 const newMessageId = (address: string, kind: string) => `<${kind}.${randomBytes(12).toString('hex')}@${address.split('@')[1] ?? 'localhost'}>`;
 
 /** MIME source of a draft, for IMAP APPEND to the Drafts folder. A draft keeps Bcc so it can be sent later. */

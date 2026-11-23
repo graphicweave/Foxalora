@@ -19,6 +19,8 @@ import { MailService } from './mail/mail.service';
 import { PreferencesController } from './preferences/preferences.controller';
 import { PreferencesService } from './preferences/preferences.service';
 import { RegistryService } from './registry/registry.service';
+import { RenderController } from './render/render.controller';
+import { RenderService } from './render/render.service';
 import { SetupController } from './setup/setup.controller';
 import { SetupService } from './setup/setup.service';
 
@@ -47,7 +49,7 @@ class Shutdown implements OnApplicationShutdown {
 }
 
 @Module({
-  controllers: [AuthController, MailController, ContactsController, PreferencesController, SetupController],
+  controllers: [AuthController, MailController, ContactsController, PreferencesController, SetupController, RenderController],
   providers: [
     // Runtime role (foxalora_app): always subject to row-level security.
     { provide: DB, useFactory: () => createDb(requireEnv('DATABASE_URL')) },
@@ -64,6 +66,7 @@ class Shutdown implements OnApplicationShutdown {
     RecipientsService,
     PreferencesService,
     SetupService,
+    RenderService,
     Shutdown,
   ],
 })

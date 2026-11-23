@@ -3,12 +3,15 @@ import { api, MessageFull } from '../api';
 import { avatarOf, displayName, formatAddr, fullDate } from '../mail/format';
 import { Icon } from '../ui/icons';
 
-// Layer 2 of HTML-email safety (layer 1 = server-side DOMPurify):
-// - sandbox without allow-scripts/allow-same-origin: no scripts, no forms, opaque origin
-// - CSP inside srcdoc: no network except data: images, so even a sanitizer bug
-//   cannot phone home or load remote content
-// Production hardening (layer 3): serve this from a separate origin.
+// HTML-email safety. Layer 1: server-side DOMPurify.
+// Layer 2: sandbox without allow-scripts/allow-same-origin (no scripts, no forms, opaque
+//   origin) and a CSP with no network except data: images, so even a sanitizer bug cannot
+//   phone home or load remote content.
+// Layer 3 (FOX-045): the body is loaded from a separate render origin with a one-time link
+//   (msg.renderUrl), so it never runs on the webmail's origin. The srcdoc frame below is the
+//   fallback for installs without a render domain; the setup check reports that case.
 const CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'";
+const SANDBOX = 'allow-popups allow-popups-to-escape-sandbox';
 
 function wrap(html: string) {
   return `<!doctype html><html><head><meta charset="utf-8">
@@ -60,10 +63,17 @@ export default function MessageView({ msg, flagged, onToggleFlag }: { msg: Messa
       </header>
 
       <div className="msg-content">
-        {msg.html ? (
-          <iframe title="Message content" sandbox="allow-popups allow-popups-to-escape-sandbox" srcDoc={wrap(msg.html)} referrerPolicy="no-referrer" />
+        {msg.renderUrl ? (
+          <iframe key={msg.renderUrl} title="Message content" sandbox={SANDBOX} src={msg.renderUrl} referrerPolicy="no-referrer" />
+        ) : msg.html ? (
+          <iframe title="Message content" sandbox={SANDBOX} srcDoc={wrap(msg.html)} referrerPolicy="no-referrer" />
         ) : (
-          <pre dir="auto">{msg.text}</pre>
+          <>
+            {msg.htmlTooComplex && (
+              <p className="msg-note" role="note">This message's formatting is too large or too complex to show safely, so it is shown as plain text.</p>
+            )}
+            <pre dir="auto">{msg.text}</pre>
+          </>
         )}
       </div>
 
