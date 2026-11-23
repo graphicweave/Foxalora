@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { Redis } from 'ioredis';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { LoginThrottleService } from '../src/auth/login-throttle.service';
+import { ipKey, LoginThrottleService } from '../src/auth/login-throttle.service';
 import { VaultService, type SessionData } from '../src/auth/vault.service';
 
 const URL_ = process.env.FOXALORA_TEST_VALKEY_URL ?? '';
@@ -119,7 +119,6 @@ describe.skipIf(!URL_)('login throttle in Valkey (no account lockout)', () => {
     const delays: number[] = [];
     for (let i = 0; i < 9; i++) {
       delays.push((await t.check('alice@a.example', '198.51.100.1')).delayMs);
-      await t.recordFailure('alice@a.example', '198.51.100.1');
     }
     expect(delays.slice(0, 3)).toEqual([0, 0, 0]);
     expect(delays.slice(3, 7)).toEqual([500, 1000, 2000, 4000]);
@@ -128,7 +127,7 @@ describe.skipIf(!URL_)('login throttle in Valkey (no account lockout)', () => {
 
   it('an attacker on another IP cannot meaningfully slow down or lock out the real user', async () => {
     const t = new LoginThrottleService(redis);
-    for (let i = 0; i < 12; i++) await t.recordFailure('alice@a.example', '203.0.113.66');
+    for (let i = 0; i < 12; i++) await t.check('alice@a.example', '203.0.113.66');
     const victim = await t.check('alice@a.example', '198.51.100.1');
     expect(victim.blocked).toBe(false);
     expect(victim.delayMs).toBe(0); // account counter 12 -> level floor(12/5)-3 < 0
@@ -137,15 +136,37 @@ describe.skipIf(!URL_)('login throttle in Valkey (no account lockout)', () => {
   it('hard-blocks only an IP that keeps failing, and success clears the pair counter', async () => {
     process.env.LOGIN_IP_MAX_FAILURES = '6';
     const t = new LoginThrottleService(redis);
-    for (let i = 0; i < 6; i++) await t.recordFailure(`user${i}@a.example`, '203.0.113.9');
+    for (let i = 0; i < 6; i++) await t.check(`user${i}@a.example`, '203.0.113.9');
     expect((await t.check('someone@a.example', '203.0.113.9')).blocked).toBe(true);
     expect((await t.check('someone@a.example', '198.51.100.2')).blocked).toBe(false);
     delete process.env.LOGIN_IP_MAX_FAILURES;
 
     const t2 = new LoginThrottleService(redis);
-    for (let i = 0; i < 5; i++) await t2.recordFailure('bob@b.example', '198.51.100.3');
-    expect((await t2.check('bob@b.example', '198.51.100.3')).delayMs).toBeGreaterThan(0);
+    for (let i = 0; i < 5; i++) await t2.check('bob@b.example', '198.51.100.3');
+    expect((await t2.check('bob@b.example', '198.51.100.3')).delayMs).toBeGreaterThan(0); // 6th attempt, then it succeeds
     await t2.recordSuccess('bob@b.example', '198.51.100.3');
     expect((await t2.check('bob@b.example', '198.51.100.3')).delayMs).toBe(0);
+  });
+
+  it('counts simultaneous attempts one by one, so a burst cannot skip the limits', async () => {
+    process.env.LOGIN_IP_MAX_FAILURES = '50';
+    const t = new LoginThrottleService(redis);
+    const all = await Promise.all(Array.from({ length: 60 }, () => t.check('dave@a.example', '203.0.113.77')));
+    delete process.env.LOGIN_IP_MAX_FAILURES;
+    expect(all.filter((d) => d.blocked)).toHaveLength(10);
+    expect(all.filter((d) => !d.blocked && d.delayMs === 0)).toHaveLength(3); // only the free attempts run at once
+  });
+
+  it('groups IPv6 addresses by /64 and unwraps IPv4-mapped addresses', async () => {
+    expect(ipKey('2001:db8:1:2:aaaa::1')).toBe('2001:db8:1:2::/64');
+    expect(ipKey('2001:0db8:0001:0002:ffff:ffff:ffff:ffff')).toBe('2001:db8:1:2::/64');
+    expect(ipKey('2001:db8::1')).toBe('2001:db8:0:0::/64');
+    expect(ipKey('::ffff:198.51.100.7')).toBe('198.51.100.7');
+    process.env.LOGIN_IP_MAX_FAILURES = '3';
+    const t = new LoginThrottleService(redis);
+    for (let i = 0; i < 3; i++) await t.check(`u${i}@a.example`, `2001:db8:1:2::${i + 1}`);
+    expect((await t.check('x@a.example', '2001:db8:1:2:ffff::9')).blocked).toBe(true);
+    expect((await t.check('x@a.example', '2001:db8:1:3::1')).blocked).toBe(false);
+    delete process.env.LOGIN_IP_MAX_FAILURES;
   });
 });

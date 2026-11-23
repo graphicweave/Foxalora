@@ -4,6 +4,15 @@ import { json, type NextFunction, type Request, type Response } from 'express';
 import { ApiExceptionFilter } from './common/api-exception.filter';
 import { RENDER_PATH, renderConfig } from './render/render-config';
 
+/**
+ * The host name the client asked for, from the Host header only. Express's req.hostname would
+ * prefer X-Forwarded-Host from a trusted proxy, and a client could set that header itself.
+ */
+export function requestHost(req: { headers: Record<string, string | string[] | undefined> }): string {
+  const raw = String(req.headers.host ?? '').trim().toLowerCase();
+  return raw.startsWith('[') ? raw.slice(0, raw.indexOf(']') + 1) : raw.replace(/:\d+$/, '');
+}
+
 const deny = (res: Response, status: number, code: string, message: string) =>
   res.status(status).json({ error: { code, message } });
 
@@ -26,7 +35,7 @@ export function configureApp(app: INestApplication) {
   const isRenderPath = (req: Request) => req.path.startsWith(RENDER_PATH);
   if (render) {
     app.use((req: Request, res: Response, next: NextFunction) => {
-      const onRenderHost = (req.hostname ?? '').toLowerCase() === render.renderHost;
+      const onRenderHost = requestHost(req) === render.renderHost;
       return onRenderHost === isRenderPath(req) ? next() : deny(res, 404, 'not_found', 'Not found.');
     });
   }
@@ -36,7 +45,7 @@ export function configureApp(app: INestApplication) {
   if (allowedHosts.length) {
     if (render) allowedHosts.push(render.renderHost);
     app.use((req: Request, res: Response, next: NextFunction) => {
-      const host = (req.hostname ?? '').toLowerCase();
+      const host = requestHost(req);
       return allowedHosts.includes(host) ? next() : deny(res, 400, 'bad_host', 'Unknown host.');
     });
   }

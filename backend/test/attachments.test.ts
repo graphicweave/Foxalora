@@ -62,3 +62,13 @@ describe('attachments (send; CLAUDE.md rule 11)', () => {
     expect(parseOutgoing(m, 'draft').files).toEqual([]);
   });
 });
+
+describe('attachment names that change on save (internal test 2026-11-23)', () => {
+  const file = (filename: string) => ({ filename, contentType: 'text/plain', data: Buffer.from('echo hi').toString('base64') });
+  it.each(['payload.bat.', 'payload.bat ', 'payload.bat. . ', 'x.exe::$DATA', 'x.ps1', 'x.vhd', 'x.reg', 'x.library-ms'])('refuses %j', (name) => {
+    expect(() => validateAttachments([file(name)])).toThrow(/cannot be sent/);
+  });
+  it('keeps ordinary names', () => {
+    expect(validateAttachments([file('notes.txt')])[0].filename).toBe('notes.txt');
+  });
+});

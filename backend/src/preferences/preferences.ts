@@ -29,7 +29,8 @@ type Check = (v: unknown) => boolean;
 const CHECKS: { [K in keyof Preferences]: Check } = {
   // No control characters (header injection) and no angle brackets or quotes, so the
   // name cannot pose as another address ("PayPal <security@paypal.com>").
-  displayName: (v) => typeof v === 'string' && v.trim().length <= 100 && !CONTROL_CHARS.test(v) && !/[<>"]/.test(v),
+  // No bidi controls: they can make the name shown to recipients read differently (spoofing).
+  displayName: (v) => typeof v === 'string' && v.trim().length <= 100 && !CONTROL_CHARS.test(v) && !/[<>"]/.test(v) && !/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/.test(v),
   theme: (v) => v === 'system' || v === 'light' || v === 'dark',
   density: (v) => v === 'comfortable' || v === 'compact',
   timeZone: (v) => typeof v === 'string' && (v === 'auto' || TIME_ZONES.has(v)),

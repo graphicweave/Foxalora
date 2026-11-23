@@ -67,7 +67,12 @@ export default function MessageView({ msg, flagged, onToggleFlag }: { msg: Messa
         ) : msg.html ? (
           <iframe title="Message content" sandbox={SANDBOX} srcDoc={wrap(msg.html)} referrerPolicy="no-referrer" />
         ) : (
-          <pre dir="auto">{msg.text}</pre>
+          <>
+            {msg.htmlTooComplex && (
+              <p className="msg-note" role="note">This message's formatting is too large or too complex to show safely, so it is shown as plain text.</p>
+            )}
+            <pre dir="auto">{msg.text}</pre>
+          </>
         )}
       </div>
 

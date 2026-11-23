@@ -26,6 +26,10 @@ const BLOCKED_EXTENSIONS = new Set([
   'hta', 'ins', 'isp', 'iso', 'jar', 'js', 'jse', 'lib', 'lnk', 'mde', 'msc', 'msi', 'msix',
   'msp', 'mst', 'nsh', 'pif', 'ps1', 'scr', 'sct', 'shb', 'sys', 'vb', 'vbe', 'vbs', 'vxd',
   'wsc', 'wsf', 'wsh',
+  // Added after the 2026-11-23 internal test: disk images, registry and shortcut files, PowerShell, ClickOnce.
+  'img', 'vhd', 'vhdx', 'reg', 'scf', 'url', 'jnlp', 'xll', 'psm1', 'psd1', 'ps1xml', 'ps2', 'ps2xml', 'psc1', 'psc2',
+  'ws', 'msh', 'msh1', 'msh2', 'mshxml', 'gadget', 'inf', 'application', 'appref-ms', 'library-ms', 'settingcontent-ms',
+  'diagcab', 'iqy', 'slk', 'xbap',
 ]);
 
 /** Native executable formats by magic bytes, refused whatever the file is called. */
@@ -60,7 +64,9 @@ export function validateAttachments(list: unknown): OutgoingAttachment[] {
   const out: OutgoingAttachment[] = [];
   for (const raw of list as AttachmentInput[]) {
     if (!raw || typeof raw !== 'object') throw new BadRequestException('invalid attachment');
-    const filename = safeFilename(raw.filename);
+    // Trailing dots and spaces are dropped by Windows and browsers on save ("payload.bat." -> "payload.bat"),
+    // so they are removed before the extension check and in the name that is sent.
+    const filename = safeFilename(raw.filename).replace(/[.\s]+$/, '') || 'attachment';
     if (typeof raw.data !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(raw.data)) throw new BadRequestException('invalid attachment data');
     if (raw.data.length > Math.ceil((MAX_ATTACHMENT_BYTES * 4) / 3) + 4) throw new BadRequestException('attachment too large (max 10 MB per file)');
     const content = Buffer.from(raw.data, 'base64');
@@ -69,8 +75,11 @@ export function validateAttachments(list: unknown): OutgoingAttachment[] {
     total += content.length;
     if (total > MAX_ATTACHMENTS_TOTAL_BYTES) throw new BadRequestException('attachments too large in total (max 20 MB)');
 
-    const ext = filename.toLowerCase().match(/\.([a-z0-9]{1,10})$/)?.[1];
-    if (ext && BLOCKED_EXTENSIONS.has(ext)) throw new BadRequestException(`this file type cannot be sent: .${ext}`);
+    // Also the part before a colon: "x.exe::$DATA" is an NTFS stream name that some programs save as x.exe.
+    for (const name of new Set([filename, filename.split(':')[0].replace(/[.\s]+$/, '')])) {
+      const ext = name.toLowerCase().match(/\.([a-z0-9-]{1,20})$/)?.[1];
+      if (ext && BLOCKED_EXTENSIONS.has(ext)) throw new BadRequestException(`this file type cannot be sent: .${ext}`);
+    }
     if (isExecutable(content)) throw new BadRequestException(`programs cannot be sent as attachments: ${filename}`);
 
     out.push({ filename, contentType: sniff(content) ?? declaredType(raw.contentType), content, contentDisposition: 'attachment' });

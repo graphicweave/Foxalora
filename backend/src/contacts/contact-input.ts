@@ -38,7 +38,9 @@ export function parseContactInput(body: unknown): ContactInput {
     const o = typeof item === 'string' ? { email: item } : item;
     if (!o || typeof o !== 'object') bad('an email address is not valid');
     const email = text((o as Record<string, unknown>).email, 'an email address is not valid', MAX_EMAIL_LENGTH);
-    const label = text((o as Record<string, unknown>).label, 'an address label is not valid', 50);
+    const label = text((o as Record<string, unknown>).label, 'an address label is not valid', 50).toLowerCase();
+    // The same labels as the UI and vCard import; anything else would be written unescaped into exports.
+    if (!['', 'work', 'home', 'other'].includes(label)) bad('an address label is not valid');
     if (!EMAIL_RE.test(email)) bad(`“${email.slice(0, 80)}” is not a valid email address`);
     if (seen.has(email.toLowerCase())) continue;
     seen.add(email.toLowerCase());

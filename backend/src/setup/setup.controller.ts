@@ -4,6 +4,7 @@ import { hasCsrfHeader } from '../auth/auth.guard';
 import { ServerValidationError } from '../registry/server-validation';
 import { parseServer, parseSetupInput, parseTestMailbox } from './setup-input';
 import { SetupClosedError, SetupConflictError, SetupService } from './setup.service';
+import { requestHost } from '../http';
 
 export const SETUP_TOKEN_HEADER = 'x-setup-token';
 
@@ -30,7 +31,7 @@ export class SetupController {
   @Get('checks')
   async checks(@Req() req: Request) {
     await this.gate(req);
-    return { site: req.hostname, checks: await this.setup.checks(req) };
+    return { site: requestHost(req), checks: await this.setup.checks(req) };
   }
 
   @Post('test-server')
