@@ -36,6 +36,9 @@ blocked.addSubnet('2002::', 16, 'ipv6'); // 6to4
 blocked.addSubnet('2001::', 32, 'ipv6'); // Teredo
 blocked.addSubnet('2001:db8::', 32, 'ipv6'); // documentation
 blocked.addSubnet('100::', 64, 'ipv6'); // discard
+blocked.addSubnet('::', 96, 'ipv6'); // deprecated IPv4-compatible (::a.b.c.d); plain IPv4 is unaffected
+blocked.addSubnet('fec0::', 10, 'ipv6'); // deprecated site-local
+blocked.addSubnet('ff00::', 8, 'ipv6'); // multicast
 // No rule for IPv4-mapped ::ffff:0:0/96: Node's BlockList treats IPv4 and
 // IPv4-mapped addresses as the same, so such a rule would block ALL of IPv4,
 // and the IPv4 rules above already cover ::ffff:127.0.0.1 and friends.

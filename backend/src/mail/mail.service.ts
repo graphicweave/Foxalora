@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import type { FetchMessageObject, ImapFlow, MessageAddressObject, MessageStructureObject } from 'imapflow';
 import type { Readable } from 'node:stream';
 import { safeFilename } from '../security/filename';
-import { sanitizeEmailHtml } from '../security/sanitize';
+import { htmlToRoughText, isHtmlTooComplex, sanitizeEmailHtml } from '../security/sanitize';
 import { MailboxCreds, openImap, withSmtp } from './connections';
 import { decodePart } from './decode-part';
 import { MailError, normalizeMailError } from './mail-errors';
@@ -417,6 +417,9 @@ export class MailService {
       await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
 
       const env = msg.envelope;
+      // Markup that would block the server while sanitizing is shown as plain text instead.
+      const htmlTooComplex = !!htmlBody && isHtmlTooComplex(htmlBody.text);
+      const bodyText = textBody?.text || (htmlTooComplex ? htmlToRoughText(htmlBody!.text) : '');
       return {
         id: encodeMessageId(ref.folder, ref.uidValidity, ref.uid),
         subject: env?.subject ?? '(no subject)',
@@ -429,9 +432,10 @@ export class MailService {
         messageId: env?.messageId ?? null,
         inReplyTo: env?.inReplyTo ?? null,
         flagged: msg.flags?.has('\\Flagged') ?? false,
-        text: textBody?.text ?? '',
+        text: bodyText,
         // Untrusted: sanitized here, then rendered in a sandboxed iframe by the UI.
-        html: htmlBody ? sanitizeEmailHtml(htmlBody.text) : null,
+        html: htmlBody && !htmlTooComplex ? sanitizeEmailHtml(htmlBody.text) : null,
+        htmlTooComplex,
         truncated: !!(textBody?.truncated || htmlBody?.truncated),
         attachments: attachments.map((a) => ({ part: a.part, filename: a.filename, size: a.size, contentType: a.contentType, inline: a.inline })),
       };

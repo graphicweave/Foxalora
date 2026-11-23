@@ -213,6 +213,9 @@ describe.skipIf(!hasPg || !VALKEY)('render host over HTTP (FOX-045)', () => {
     expect((await call(RENDER_HOST, 'POST', '/api/v1/auth/login', { 'X-Requested-With': 'foxalora' }, { email: 'alice@a.example', password: PASSWORD })).status).toBe(404);
     // The link was not used up by the refused request on the webmail host.
     expect((await call(RENDER_HOST, 'GET', url.pathname)).status).toBe(200);
+    // A forged X-Forwarded-Host cannot move a request to the render host (Express would trust it from a proxy).
+    expect((await call(APP_HOST, 'GET', url.pathname, { 'X-Forwarded-Host': RENDER_HOST })).status).toBe(404);
+    expect((await call(RENDER_HOST, 'GET', '/api/v1/auth/me', { 'X-Forwarded-Host': APP_HOST, Cookie: cookie })).status).toBe(404);
     // Other host names are refused too.
     expect((await call('evil.test', 'GET', url.pathname)).status).toBe(404);
     expect((await call('evil.test', 'GET', '/api/v1/auth/me')).status).toBe(400);

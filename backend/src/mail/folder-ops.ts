@@ -23,6 +23,8 @@ export function validateFolderName(raw: unknown, delimiter: string): string {
     throw new BadRequestException(`Folder names cannot contain ${delimiter && delimiter !== '/' ? `"${delimiter}", ` : ''}/, *, %, " or \\.`);
   }
   if (name.toUpperCase() === 'INBOX') throw new BadRequestException('That name is reserved.');
+  // "~" and "#" start other users' or shared namespaces on some servers; names of only dots are paths.
+  if (/^[~#]/.test(name) || /^\.+$/.test(name)) throw new BadRequestException('Folder names cannot start with ~ or # or be only dots.');
   return name;
 }
 

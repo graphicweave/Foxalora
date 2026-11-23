@@ -3,7 +3,9 @@ import type { Request } from 'express';
 import { MailServer, RegistryService } from '../registry/registry.service';
 import { VaultService } from './vault.service';
 
-export const COOKIE_NAME = 'fx_sid';
+// Production: the __Host- prefix makes browsers refuse the cookie unless it is Secure, Path=/ and
+// host-only, so no subdomain (such as the render host) can ever plant or shadow a session cookie.
+export const COOKIE_NAME = process.env.NODE_ENV === 'production' ? '__Host-fx_sid' : 'fx_sid';
 export const CSRF_HEADER = 'x-requested-with';
 
 export function hasCsrfHeader(req: { headers: Record<string, string | string[] | undefined> }): boolean {
