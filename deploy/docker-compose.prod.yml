@@ -17,6 +17,8 @@ services:
       dockerfile: frontend/Dockerfile
     environment:
       DOMAIN: ${DOMAIN:?run install.sh first}
+      # Separate address that shows email content (FOX-045). Unset in installs from before it existed.
+      RENDER_DOMAIN: ${RENDER_DOMAIN:-render.invalid}
     volumes:
       - ./certs:/certs:ro
       - ./acme:/var/www/acme:ro # Let's Encrypt HTTP-01 challenges (renew-cert.sh)
@@ -37,6 +39,9 @@ services:
       VALKEY_URL: redis://:${VALKEY_PASSWORD:?}@valkey:6379
       FOXALORA_VAULT_KEYS: ${VAULT_KEYS:?}
       ALLOWED_HOSTS: ${DOMAIN}
+      # FOX-045: email bodies are served from this second host name (empty: sandboxed frame on the app origin).
+      FOXALORA_RENDER_DOMAIN: ${RENDER_DOMAIN:-}
+      FOXALORA_APP_ORIGIN: https://${DOMAIN}
       # Opens the browser setup wizard until the first administrator exists (FOX-099/100).
       FOXALORA_SETUP_TOKEN: ${SETUP_TOKEN:-}
       SESSION_IDLE_MINUTES: ${SESSION_IDLE_MINUTES:-30}

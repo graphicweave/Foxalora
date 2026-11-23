@@ -9,6 +9,7 @@ import type { Database } from '../database/schema';
 import { probeServer } from '../mail/connections';
 import { RegistryService } from '../registry/registry.service';
 import { isProduction, type ServerInput } from '../registry/server-validation';
+import { renderConfig } from '../render/render-config';
 import { SsrfError } from '../security/ssrf';
 import { hashAdminPassword } from './admin-password';
 import type { SetupInput } from './setup-input';
@@ -85,6 +86,18 @@ export class SetupService {
     const hosts = (process.env.ALLOWED_HOSTS ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
     add('host', 'Site address', hosts.length ? 'ok' : prod ? 'fail' : 'warn',
       hosts.length ? `Webmail answers only at ${hosts.join(', ')}.` : 'ALLOWED_HOSTS is not set, so any host name is accepted.');
+
+    let render: ReturnType<typeof renderConfig> = null;
+    let renderError = '';
+    try {
+      render = renderConfig();
+    } catch (e) {
+      renderError = e instanceof Error ? e.message : 'Invalid configuration.';
+    }
+    add('render', 'Separate address for email content', render ? 'ok' : prod ? 'fail' : 'warn',
+      render
+        ? `Email content is shown from ${render.renderHost}, apart from the webmail and its cookies.`
+        : renderError || 'Not set up: email content is shown in a sandboxed frame on the webmail address itself. Set RENDER_DOMAIN in deploy/.env (install.sh does this for new installs).');
 
     return checks;
   }

@@ -90,7 +90,7 @@ describe.skipIf(!hasPg || !VALKEY)('setup wizard (FOX-099, FOX-100)', () => {
     const r = await req('GET', '/checks');
     expect(r.status).toBe(200);
     const ids = r.json.checks.map((c: { id: string }) => c.id);
-    expect(ids).toEqual(['https', 'database', 'valkey', 'vault', 'mode', 'host']);
+    expect(ids).toEqual(['https', 'database', 'valkey', 'vault', 'mode', 'host', 'render']);
     expect(r.json.checks.find((c: { id: string }) => c.id === 'valkey').status).toBe('ok');
     expect(r.json.checks.find((c: { id: string }) => c.id === 'https').status).toBe('warn'); // plain HTTP, not production
   });
