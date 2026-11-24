@@ -705,6 +705,14 @@ export default function Mailbox({ email, onCompose, version }: { email: string; 
                 : { label: 'Add star', icon: Icon.star, onSelect: () => mark({ flagged: true }) },
             ]}
           />
+          {msg ? (
+            <a className="tool-btn" href={api.rawMessageUrl(msg.id)} download data-tip="Download the full message as a .eml file">
+              {Icon.download}
+              <span className="tool-label">Download</span>
+            </a>
+          ) : (
+            <ToolButton icon={Icon.download} label="Download" tip="Download the full message as a .eml file" disabled onClick={() => {}} />
+          )}
         </div>
 
         <div className="reader-body">

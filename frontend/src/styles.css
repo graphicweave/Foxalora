@@ -82,6 +82,9 @@ button.ghost { border: 1px solid var(--line); border-radius: 8px; padding: 6px 1
 .login label { display: grid; gap: 6px; font-size: 13px; font-weight: 500; }
 .login .notice { margin: 0; }
 .login > p { margin: 0; text-align: center; }
+.password-field { position: relative; }
+.password-field input { padding-right: 42px; }
+.password-field .icon-btn { position: absolute; top: 50%; right: 4px; transform: translateY(-50%); width: 32px; height: 32px; }
 
 /* ---------- App layout: rail | view. Mail view: folders | list | reader ---------- */
 .app { height: 100vh; height: 100dvh; display: grid; grid-template-columns: 80px minmax(0, 1fr); background: var(--bg); }
@@ -329,6 +332,19 @@ button.ghost.danger-text { border-color: color-mix(in srgb, var(--danger) 40%, t
 .import-form { display: grid; gap: 16px; }
 .import-form p, .import-result p { margin: 0 0 8px; }
 .error-list { max-height: 180px; overflow: auto; margin: 0 0 16px; padding-left: 18px; color: var(--danger); font-size: 13px; }
+.csv-map { display: grid; gap: 8px; max-height: 260px; overflow: auto; padding-right: 4px; }
+.csv-map-row { display: grid; grid-template-columns: minmax(0, 1fr) 160px; gap: 10px; align-items: center; }
+.csv-map-head { display: grid; min-width: 0; }
+.csv-map-row select { width: 100%; }
+.group-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 14px 10px; border-bottom: 1px solid var(--line); }
+.chip-btn { display: inline-flex; align-items: center; gap: 6px; max-width: 180px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: transparent; font-size: 12.5px; overflow: hidden; white-space: nowrap; }
+.chip-btn small { color: var(--muted); font-size: 11px; }
+.chip-btn:hover { background: var(--hover); }
+.chip-btn.active { background: var(--accent-soft); border-color: transparent; color: var(--accent-text); font-weight: 600; }
+.chip-btn.active small { color: inherit; }
+.group-bar .icon-btn { width: 28px; height: 28px; }
+.group-actions { display: inline-flex; gap: 2px; margin-left: auto; }
+.contact-groups { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; }
 
 /* ---------- Settings ---------- */
 .settings-nav { display: flex; flex-direction: column; }

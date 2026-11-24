@@ -64,6 +64,7 @@ export function configureApp(app: INestApplication) {
   app.use('/api/v1/messages/send', json({ limit: '45mb' }));
   app.use('/api/v1/drafts', json({ limit: '15mb' })); // drafts carry the same inline images
   app.use('/api/v1/contacts/import', json({ limit: '3mb' })); // vCard files up to 2 MB
+  app.use('/api/v1/contacts/import-csv', json({ limit: '3mb' })); // CSV files up to 2 MB
   app.use(json({ limit: '1mb' }));
   app.use(cookieParser());
 

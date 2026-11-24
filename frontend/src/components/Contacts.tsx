@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
-import { api, type Contact, type ContactDraft } from '../api';
+import { api, type Contact, type ContactDraft, type ContactGroup } from '../api';
+import { buildMapping, dedupeSingles, FIELD_OPTIONS, guessField, mappingUsable, parseFirstRows, SINGLE_FIELDS, type CsvField } from '../contacts/csv';
 import { avatarOf } from '../mail/format';
 import { Icon } from '../ui/icons';
+import { Menu } from '../ui/Menu';
 import { useConfirm } from '../ui/confirm-context';
 import { useToast } from '../ui/toast-context';
 import type { ComposeInit } from './Compose';
@@ -27,18 +29,23 @@ export default function Contacts({ onCompose }: { onCompose: (init: ComposeInit)
   const [selected, setSelected] = useState<Contact | null>(null);
   const [editing, setEditing] = useState<(ContactDraft & { id?: string }) | null>(null);
   const [importing, setImporting] = useState(false);
+  const [groups, setGroups] = useState<ContactGroup[]>([]);
+  const [activeGroup, setActiveGroup] = useState<string | null>(null);
+  const [groupDialog, setGroupDialog] = useState<{ id?: string; name: string } | null>(null);
   const seq = useRef(0);
 
-  function load(q: string, p: number) {
+  function load(q: string, p: number, g: string | null = activeGroup) {
     const n = ++seq.current;
     setLoading(true);
     setError('');
     api
-      .contacts(q, p)
+      .contacts(q, p, g)
       .then((r) => n === seq.current && setData(r))
       .catch((e: Error) => n === seq.current && setError(e.message))
       .finally(() => n === seq.current && setLoading(false));
   }
+
+  const loadGroups = () => api.groups().then((r) => setGroups(r.items)).catch(() => {});
 
   useEffect(() => {
     const n = ++seq.current;
@@ -47,6 +54,7 @@ export default function Contacts({ onCompose }: { onCompose: (init: ComposeInit)
       .then((r) => n === seq.current && setData(r))
       .catch((e: Error) => n === seq.current && setError(e.message))
       .finally(() => n === seq.current && setLoading(false));
+    api.groups().then((r) => setGroups(r.items)).catch(() => {});
   }, []);
 
   function runSearch(e: FormEvent) {
@@ -64,12 +72,67 @@ export default function Contacts({ onCompose }: { onCompose: (init: ComposeInit)
     load('', 1);
   }
 
+  function selectGroup(g: string | null) {
+    setActiveGroup(g);
+    setPage(1);
+    load(query, 1, g);
+  }
+
+  /** Row click shows what the list knows, then fills in the group memberships. */
+  function open(c: Contact) {
+    setEditing(null);
+    setSelected(c);
+    api.contact(c.id).then((full) => setSelected((cur) => (cur?.id === c.id ? full : cur))).catch(() => {});
+  }
+
+  async function toggleMembership(g: ContactGroup) {
+    if (!selected) return;
+    try {
+      // The list payload has no groups; fetch the detail before deciding the direction.
+      const cur = selected.groups ? selected : await api.contact(selected.id);
+      const member = cur.groups?.some((x) => x.id === g.id) ?? false;
+      if (member) await api.removeFromGroup(g.id, selected.id);
+      else await api.addToGroup(g.id, selected.id);
+      const full = await api.contact(selected.id);
+      setSelected((cur) => (cur?.id === full.id ? full : cur));
+      loadGroups();
+      if (activeGroup === g.id) load(query, page);
+    } catch (e) {
+      toast('error', (e as Error).message);
+    }
+  }
+
+  async function writeToGroup(g: ContactGroup) {
+    try {
+      const { emails } = await api.groupAddresses(g.id);
+      if (!emails.length) {
+        toast('info', 'No contact in this group has an email address.');
+        return;
+      }
+      onCompose({ to: emails.join(', ') });
+    } catch (e) {
+      toast('error', (e as Error).message);
+    }
+  }
+
+  async function removeGroup(g: ContactGroup) {
+    if (!(await confirm({ title: `Delete the group “${g.name}”?`, message: 'The contacts in it are kept; only the group is removed.', confirmLabel: 'Delete group', danger: true }))) return;
+    try {
+      await api.deleteGroup(g.id);
+      toast('success', 'Group deleted.');
+      if (activeGroup === g.id) selectGroup(null);
+      loadGroups();
+      if (selected) open(selected);
+    } catch (e) {
+      toast('error', (e as Error).message);
+    }
+  }
+
   async function save(draft: ContactDraft & { id?: string }) {
     const body: ContactDraft = { ...draft, emails: draft.emails.filter((e) => e.email.trim()) };
     const saved = draft.id ? await api.updateContact(draft.id, body) : await api.createContact(body);
     toast('success', draft.id ? 'Contact saved.' : 'Contact added.');
-    setEditing(null);
-    setSelected(saved);
+    open(saved); // refetches the detail, so group badges survive the save
     load(query, page);
   }
 
@@ -80,6 +143,7 @@ export default function Contacts({ onCompose }: { onCompose: (init: ComposeInit)
       toast('success', 'Contact deleted.');
       setSelected(null);
       load(query, page);
+      loadGroups();
     } catch (e) {
       toast('error', (e as Error).message);
     }
@@ -91,6 +155,7 @@ export default function Contacts({ onCompose }: { onCompose: (init: ComposeInit)
     load(query, p);
   };
   const detailOpen = !!(selected || editing);
+  const activeGroupObj = groups.find((g) => g.id === activeGroup) ?? null;
 
   return (
     <main id="main" tabIndex={-1} className={`contacts-view ${detailOpen ? 'has-detail' : ''}`}>
@@ -107,10 +172,32 @@ export default function Contacts({ onCompose }: { onCompose: (init: ComposeInit)
         </div>
         <div className="list-title">
           <h1>Contacts</h1>
-          <span className="muted small">{query ? `${data.total} found for “${query}”` : `${data.total} contact${data.total === 1 ? '' : 's'}`}</span>
+          <span className="muted small">
+            {query
+              ? `${data.total} found for “${query}”`
+              : activeGroupObj
+                ? `${data.total} in “${activeGroupObj.name}”`
+                : `${data.total} contact${data.total === 1 ? '' : 's'}`}
+          </span>
           <span className="grow" />
-          <button type="button" className="icon-btn" aria-label="Import contacts" data-tip="Import contacts (vCard)" onClick={() => setImporting(true)}>{Icon.upload}</button>
+          <button type="button" className="icon-btn" aria-label="Import contacts" data-tip="Import contacts (vCard or CSV)" onClick={() => setImporting(true)}>{Icon.upload}</button>
           <a className={`icon-btn ${data.total ? '' : 'disabled'}`} href={data.total ? api.exportContactsUrl() : undefined} aria-disabled={!data.total} download aria-label="Export all contacts" data-tip="Export all contacts (vCard)">{Icon.download}</a>
+        </div>
+        <div className="group-bar" role="toolbar" aria-label="Groups">
+          <button type="button" className={`chip-btn ${activeGroup ? '' : 'active'}`} aria-pressed={!activeGroup} onClick={() => selectGroup(null)}>All</button>
+          {groups.map((g) => (
+            <button type="button" key={g.id} className={`chip-btn ${activeGroup === g.id ? 'active' : ''}`} aria-pressed={activeGroup === g.id} onClick={() => selectGroup(g.id)} dir="auto">
+              {g.name}<small>{g.members}</small>
+            </button>
+          ))}
+          <button type="button" className="icon-btn group-add" aria-label="New group" data-tip="New group" onClick={() => setGroupDialog({ name: '' })}>{Icon.plus}</button>
+          {activeGroupObj && (
+            <span className="group-actions">
+              <button type="button" className="icon-btn" aria-label={`Write to everyone in ${activeGroupObj.name}`} data-tip="Write to this group" disabled={!activeGroupObj.members} onClick={() => writeToGroup(activeGroupObj)}>{Icon.send}</button>
+              <button type="button" className="icon-btn" aria-label={`Rename ${activeGroupObj.name}`} data-tip="Rename group" onClick={() => setGroupDialog({ id: activeGroupObj.id, name: activeGroupObj.name })}>{Icon.pen}</button>
+              <button type="button" className="icon-btn" aria-label={`Delete ${activeGroupObj.name}`} data-tip="Delete group" onClick={() => removeGroup(activeGroupObj)}>{Icon.trash}</button>
+            </span>
+          )}
         </div>
         <div className="list-body" aria-busy={loading}>
           {error && <div className="notice error" role="alert">{Icon.alert}<span>{error}</span></div>}
@@ -121,7 +208,7 @@ export default function Contacts({ onCompose }: { onCompose: (init: ComposeInit)
                 const active = selected?.id === c.id || editing?.id === c.id;
                 return (
                   <li key={c.id}>
-                    <button type="button" className={`msg-row contact-row ${active ? 'active' : ''}`} aria-current={active ? 'true' : undefined} onClick={() => { setEditing(null); setSelected(c); }}>
+                    <button type="button" className={`msg-row contact-row ${active ? 'active' : ''}`} aria-current={active ? 'true' : undefined} onClick={() => open(c)}>
                       <span className="avatar" style={{ '--h': av.hue } as CSSProperties} aria-hidden="true">{av.letter}</span>
                       <span className="msg-main">
                         <span className="msg-from ellipsis" dir="auto">{nameOf(c)}</span>
@@ -136,13 +223,15 @@ export default function Contacts({ onCompose }: { onCompose: (init: ComposeInit)
           {!loading && !error && !data.items.length && (
             <div className="empty">
               {query ? Icon.search : Icon.contacts}
-              <strong>{query ? 'No contacts match your search' : 'No contacts yet'}</strong>
+              <strong>{query ? 'No contacts match your search' : activeGroupObj ? 'No contacts in this group' : 'No contacts yet'}</strong>
               {query ? (
                 <button type="button" className="link" onClick={clearSearch}>Clear search</button>
+              ) : activeGroupObj ? (
+                <span className="muted small">Open a contact and use the Groups button to add it here.</span>
               ) : (
                 <span className="row-actions">
                   <button type="button" className="link" onClick={() => setEditing({ ...EMPTY, emails: [{ email: '', label: '' }] })}>Add a contact</button>
-                  <button type="button" className="link" onClick={() => setImporting(true)}>Import a vCard file</button>
+                  <button type="button" className="link" onClick={() => setImporting(true)}>Import a file</button>
                 </span>
               )}
             </div>
@@ -167,6 +256,19 @@ export default function Contacts({ onCompose }: { onCompose: (init: ComposeInit)
               <ToolButton icon={Icon.send} label="Write email" disabled={!selected.emails.length} onClick={() => onCompose({ to: selected.emails[0].email })} />
               <ToolButton icon={Icon.pen} label="Edit" onClick={() => setEditing(selected)} />
               <ToolButton icon={Icon.trash} label="Delete" onClick={() => remove(selected)} />
+              <Menu
+                label="Groups"
+                icon={Icon.contacts}
+                tip="Add this contact to groups, or take it out"
+                items={() => [
+                  ...groups.map((g) => ({
+                    label: g.name,
+                    icon: selected.groups?.some((x) => x.id === g.id) ? Icon.check : undefined,
+                    onSelect: () => toggleMembership(g),
+                  })),
+                  { label: 'New group…', icon: Icon.plus, onSelect: () => setGroupDialog({ name: '' }) },
+                ]}
+              />
               <span className="tool-sep" />
               <a className="tool-btn" href={api.exportContactsUrl([selected.id])} download data-tip="Export as vCard">
                 {Icon.download}<span className="tool-label">Export</span>
@@ -198,7 +300,58 @@ export default function Contacts({ onCompose }: { onCompose: (init: ComposeInit)
           }}
         />
       )}
+      {groupDialog && (
+        <GroupDialog
+          initial={groupDialog}
+          onClose={() => setGroupDialog(null)}
+          onSave={async (name) => {
+            if (groupDialog.id) await api.renameGroup(groupDialog.id, name);
+            else await api.createGroup(name);
+            toast('success', groupDialog.id ? 'Group renamed.' : 'Group created.');
+            setGroupDialog(null);
+            loadGroups();
+            if (selected) open(selected);
+          }}
+        />
+      )}
     </main>
+  );
+}
+
+function GroupDialog({ initial, onClose, onSave }: { initial: { id?: string; name: string }; onClose: () => void; onSave: (name: string) => Promise<void> }) {
+  const [name, setName] = useState(initial.name);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setBusy(true);
+    setErr('');
+    try {
+      await onSave(name.trim());
+    } catch (ex) {
+      setErr((ex as Error).message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal" onKeyDown={(e) => e.key === 'Escape' && onClose()} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <form className="dialog" role="dialog" aria-modal="true" aria-labelledby="group-title" onSubmit={submit}>
+        <button type="button" className="icon-btn dialog-close" aria-label="Close" onClick={onClose}>{Icon.x}</button>
+        <h2 id="group-title" className="dialog-title">{initial.id ? 'Rename group' : 'New group'}</h2>
+        <label className="field">
+          Group name
+          <input value={name} onChange={(e) => setName(e.target.value)} maxLength={100} autoFocus dir="auto" placeholder="Family, Team, Book club…" />
+        </label>
+        {err && <div className="notice error" role="alert">{Icon.alert}<span>{err}</span></div>}
+        <div className="form-actions">
+          <button type="button" className="ghost" onClick={onClose}>Cancel</button>
+          <button className="primary" disabled={!name.trim() || busy}>{busy ? 'Saving…' : initial.id ? 'Rename' : 'Create'}</button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -220,6 +373,11 @@ function ContactCard({ contact: c, onWrite }: { contact: Contact; onWrite: (emai
         <div>
           <h2 id="contact-name" dir="auto">{nameOf(c)}</h2>
           {c.company && <p className="muted" dir="auto">{c.company}</p>}
+          {(c.groups?.length ?? 0) > 0 && (
+            <p className="contact-groups" aria-label="Groups">
+              {c.groups!.map((g) => <span key={g.id} className="badge-soft" dir="auto">{g.name}</span>)}
+            </p>
+          )}
         </div>
       </header>
       <dl className="contact-fields">
@@ -336,6 +494,32 @@ function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
   const [err, setErr] = useState('');
+  // CSV mapping step (FOX-074): text + per-column field assignments.
+  const [csvText, setCsvText] = useState<string | null>(null);
+  const [hasHeader, setHasHeader] = useState(true);
+  const [fields, setFields] = useState<CsvField[]>([]);
+
+  const isCsv = (f: File) => /\.csv$/i.test(f.name) || f.type === 'text/csv';
+  const rows = csvText !== null ? parseFirstRows(csvText, 2) : [];
+  const headers = csvText !== null ? (hasHeader ? rows[0] ?? [] : (rows[0] ?? []).map((_, i) => `Column ${i + 1}`)) : [];
+  const preview = hasHeader ? rows[1] ?? [] : rows[0] ?? [];
+  const mapping = buildMapping(fields);
+
+  function pickFile(f: File | null) {
+    setFile(f);
+    setErr('');
+    setCsvText(null);
+    setFields([]);
+  }
+
+  function setField(i: number, f: CsvField) {
+    setFields((old) => old.map((v, j) => (j === i ? f : SINGLE_FIELDS.includes(f) && v === f ? 'ignore' : v)));
+  }
+
+  function startHeader(text: string, withHeader: boolean) {
+    const first = parseFirstRows(text, 1)[0] ?? [];
+    setFields(withHeader ? dedupeSingles(first.map(guessField)) : first.map(() => 'ignore'));
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -344,10 +528,30 @@ function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
       setErr('The file is larger than 2 MB.');
       return;
     }
-    setBusy(true);
     setErr('');
+    if (isCsv(file) && csvText === null) {
+      // Step 1 for CSV: read the file and open the column-mapping step.
+      let text: string;
+      try {
+        text = await file.text();
+      } catch {
+        setErr('The file could not be read. Choose it again.');
+        setFile(null);
+        return;
+      }
+      if (!text.trim()) {
+        setErr('The file is empty.');
+        return;
+      }
+      setCsvText(text);
+      startHeader(text, hasHeader);
+      return;
+    }
+    setBusy(true);
     try {
-      const r = await api.importContacts(await file.text(), duplicates);
+      const r = csvText !== null
+        ? await api.importContactsCsv(csvText, mapping, hasHeader, duplicates)
+        : await api.importContacts(await file.text(), duplicates);
       setResult(r);
       onDone();
       toast('success', `${r.imported} contact${r.imported === 1 ? '' : 's'} imported.`);
@@ -369,15 +573,41 @@ function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
             {result.errors.length > 0 && (
               <>
                 <p className="muted">{result.errors.length} could not be imported:</p>
-                <ul className="error-list">{result.errors.slice(0, 50).map((x) => <li key={x}>{x}</li>)}</ul>
+                <ul className="error-list">{result.errors.slice(0, 50).map((x, i) => <li key={`${i}-${x}`}>{x}</li>)}</ul>
               </>
             )}
             <div className="form-actions"><button type="button" className="primary" onClick={onClose} autoFocus>Done</button></div>
           </div>
+        ) : csvText !== null ? (
+          <form onSubmit={submit} className="import-form">
+            <p className="muted">Choose what each column becomes. At least a name or an email column is needed.</p>
+            <label className="radio">
+              <input type="checkbox" checked={hasHeader} onChange={(e) => { setHasHeader(e.target.checked); startHeader(csvText, e.target.checked); }} />
+              {' '}The first row is column names
+            </label>
+            <div className="csv-map" role="group" aria-label="Column mapping">
+              {headers.map((h, i) => (
+                <div className="csv-map-row" key={i}>
+                  <span className="csv-map-head" dir="auto">
+                    <strong className="ellipsis">{h || `Column ${i + 1}`}</strong>
+                    {preview[i] ? <small className="muted ellipsis">e.g. {preview[i]}</small> : null}
+                  </span>
+                  <select aria-label={`Import “${h || `Column ${i + 1}`}” as`} value={fields[i] ?? 'ignore'} onChange={(e) => setField(i, e.target.value as CsvField)}>
+                    {FIELD_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+            {err && <div className="notice error" role="alert">{Icon.alert}<span>{err}</span></div>}
+            <div className="form-actions">
+              <button type="button" className="ghost" onClick={() => { setFile(null); setCsvText(null); setFields([]); setErr(''); }}>Back</button>
+              <button className="primary" disabled={busy || !mappingUsable(mapping)}>{busy ? 'Importing…' : 'Import'}</button>
+            </div>
+          </form>
         ) : (
           <form onSubmit={submit} className="import-form">
-            <p className="muted">Choose a vCard file (.vcf) exported from Outlook, Gmail, Apple Contacts or another webmail.</p>
-            <input type="file" accept=".vcf,text/vcard,text/x-vcard" aria-label="vCard file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} autoFocus />
+            <p className="muted">Choose a vCard file (.vcf) exported from Outlook, Gmail, Apple Contacts or another webmail, or a CSV file (.csv) with one contact per row.</p>
+            <input type="file" accept=".vcf,.csv,text/vcard,text/x-vcard,text/csv" aria-label="vCard or CSV file" onChange={(e) => pickFile(e.target.files?.[0] ?? null)} autoFocus />
             <fieldset className="field">
               <legend>If an address is already in your contacts</legend>
               <label className="radio"><input type="radio" name="dup" checked={duplicates === 'skip'} onChange={() => setDuplicates('skip')} /> Skip that contact</label>
@@ -386,7 +616,7 @@ function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
             {err && <div className="notice error" role="alert">{Icon.alert}<span>{err}</span></div>}
             <div className="form-actions">
               <button type="button" className="ghost" onClick={onClose}>Cancel</button>
-              <button className="primary" disabled={!file || busy}>{busy ? 'Importing…' : 'Import'}</button>
+              <button className="primary" disabled={!file || busy}>{file && isCsv(file) ? 'Continue' : busy ? 'Importing…' : 'Import'}</button>
             </div>
           </form>
         )}

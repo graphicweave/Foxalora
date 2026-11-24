@@ -4,6 +4,7 @@ import { CONTROL_CHARS } from '../common/email';
 import type { Database } from '../database/schema';
 import { TenantDb, type TenantContext } from '../database/tenant-db';
 import { likePattern, parseContactInput, type ContactInput } from './contact-input';
+import { csvToContacts } from './csv';
 import { RecipientsService } from './recipients.service';
 import { parseVCards, toVCard } from './vcard';
 
@@ -37,11 +38,18 @@ export class ContactsService {
     private readonly recipients: RecipientsService,
   ) {}
 
-  async list(o: Owner, q?: unknown, page?: unknown): Promise<{ items: ContactView[]; total: number }> {
+  async list(o: Owner, q?: unknown, page?: unknown, group?: unknown): Promise<{ items: ContactView[]; total: number }> {
     const term = searchTerm(q);
     const p = Math.max(1, Math.floor(Number(page)) || 1);
+    const groupId = group === undefined || group === '' ? null : String(group);
+    if (groupId !== null && !UUID.test(groupId)) throw new NotFoundException();
     return this.tdb.run(ctx(o), async (trx) => {
       let base = trx.selectFrom('contacts');
+      if (groupId) {
+        base = base.where((eb) =>
+          eb.exists(eb.selectFrom('contact_group_members as m').select('m.id').whereRef('m.contact_id', '=', 'contacts.id').where('m.group_id', '=', groupId)),
+        );
+      }
       if (term) {
         const pat = likePattern(term);
         base = base.where((eb) =>
@@ -65,12 +73,19 @@ export class ContactsService {
     });
   }
 
-  async get(o: Owner, id: string): Promise<ContactView> {
+  async get(o: Owner, id: string): Promise<ContactView & { groups: { id: string; name: string }[] }> {
     if (!UUID.test(id)) throw new NotFoundException();
     return this.tdb.run(ctx(o), async (trx) => {
       const row = await trx.selectFrom('contacts').select(['id', 'display_name', 'company', 'phone']).where('id', '=', id).executeTakeFirst();
       if (!row) throw new NotFoundException();
-      return (await this.withEmails(trx, [row]))[0];
+      const groups = await trx
+        .selectFrom('contact_group_members as m')
+        .innerJoin('contact_groups as g', 'g.id', 'm.group_id')
+        .select(['g.id', 'g.name'])
+        .where('m.contact_id', '=', id)
+        .orderBy(sql`lower(g.name)`)
+        .execute();
+      return { ...(await this.withEmails(trx, [row]))[0], groups };
     });
   }
 
@@ -141,8 +156,19 @@ export class ContactsService {
   /** vCard import (FOX-075): valid cards are added, invalid ones listed; duplicates skipped by address unless asked. */
   async importVCard(o: Owner, body: unknown): Promise<{ imported: number; skipped: number; errors: string[] }> {
     const b = (body ?? {}) as { vcard?: unknown; duplicates?: unknown };
-    if (b.duplicates !== undefined && b.duplicates !== 'skip' && b.duplicates !== 'add') throw new BadRequestException('duplicates must be "skip" or "add"');
     const { contacts, errors } = parseVCards(b.vcard as string);
+    return this.insertImported(o, contacts, errors, b.duplicates);
+  }
+
+  /** CSV import (FOX-074): same dedupe and error rules as vCard, columns chosen by the client's mapping step. */
+  async importCsv(o: Owner, body: unknown): Promise<{ imported: number; skipped: number; errors: string[] }> {
+    const b = (body ?? {}) as { csv?: unknown; mapping?: unknown; hasHeader?: unknown; duplicates?: unknown };
+    const { contacts, errors } = csvToContacts(b.csv, b.mapping, b.hasHeader !== false);
+    return this.insertImported(o, contacts, errors, b.duplicates);
+  }
+
+  private async insertImported(o: Owner, contacts: ContactInput[], errors: string[], duplicates: unknown): Promise<{ imported: number; skipped: number; errors: string[] }> {
+    if (duplicates !== undefined && duplicates !== 'skip' && duplicates !== 'add') throw new BadRequestException('duplicates must be "skip" or "add"');
     return this.tdb.run(ctx(o), async (trx) => {
       const existing = new Set(
         (await trx.selectFrom('contact_addresses').select('email').execute()).map((r) => r.email.toLowerCase()),
@@ -150,7 +176,7 @@ export class ContactsService {
       let imported = 0, skipped = 0;
       const fresh: ContactInput[] = [];
       for (const c of contacts) {
-        if (b.duplicates !== 'add' && c.emails.some((e) => existing.has(e.email.toLowerCase()))) {
+        if (duplicates !== 'add' && c.emails.some((e) => existing.has(e.email.toLowerCase()))) {
           skipped++;
           continue;
         }

@@ -5,6 +5,7 @@ import { Icon, Logo } from '../ui/icons';
 export default function Login({ onLogin }: { onLogin: (email: string) => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -37,7 +38,12 @@ export default function Login({ onLogin }: { onLogin: (email: string) => void })
         </label>
         <label>
           Password
-          <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <div className="password-field">
+            <input type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            <button type="button" className="icon-btn" onClick={() => setShowPassword((v) => !v)} aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword}>
+              {showPassword ? Icon.eyeOff : Icon.eye}
+            </button>
+          </div>
         </label>
         {error && <div className="notice error" role="alert">{Icon.alert}<span>{error}</span></div>}
         <button className="primary" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>

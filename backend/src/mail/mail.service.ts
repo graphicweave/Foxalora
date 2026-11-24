@@ -3,6 +3,7 @@ import type { FetchMessageObject, ImapFlow, MessageAddressObject, MessageStructu
 import type { Readable } from 'node:stream';
 import { safeFilename } from '../security/filename';
 import { htmlToRoughText, isHtmlTooComplex, sanitizeEmailHtml } from '../security/sanitize';
+import { CID_LIMITS, inlineCidImages } from './cid-images';
 import { MailboxCreds, openImap, withSmtp } from './connections';
 import { decodePart } from './decode-part';
 import { MailError, normalizeMailError } from './mail-errors';
@@ -41,6 +42,7 @@ function summarize(m: FetchMessageObject, folder: string, uidValidity: bigint) {
 // opened, each capped; attachments are streamed one part at a time, on request.
 const MAX_TEXT_BYTES = Number(process.env.MAIL_MAX_TEXT_BYTES ?? 2 * 1024 * 1024);
 const MAX_ATTACHMENT_BYTES = Number(process.env.MAIL_MAX_ATTACHMENT_BYTES ?? 50 * 1024 * 1024);
+const MAX_RAW_BYTES = Number(process.env.MAIL_MAX_RAW_BYTES ?? 50 * 1024 * 1024);
 const PART_ID = /^\d{1,4}(\.\d{1,4}){0,20}$/;
 
 interface PartInfo {
@@ -121,6 +123,22 @@ async function readCapped(stream: Readable, max: number, as: BufferEncoding = 'u
     size += b.length;
   }
   return { text: Buffer.concat(chunks).toString(as), truncated };
+}
+
+/** Reads a stream into a Buffer, stopping one byte past `max` so oversize is detectable. */
+async function readBuffer(stream: Readable, max: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of stream) {
+    const b = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    chunks.push(b.subarray(0, max + 1 - size));
+    size += b.length;
+    if (size > max) {
+      stream.destroy();
+      break;
+    }
+  }
+  return Buffer.concat(chunks);
 }
 
 /**
@@ -414,11 +432,25 @@ export class MailService {
       };
       const textBody = await read(text);
       const htmlBody = await read(html);
+
+      // Markup that would block the server while sanitizing is shown as plain text instead.
+      const htmlTooComplex = !!htmlBody && isHtmlTooComplex(htmlBody.text);
+      // Referenced cid: images become data: URIs in the HTML (FOX-048); refused or
+      // unreferenced parts stay in the attachment list. Skipped when the HTML will
+      // not be shown anyway (too complex): no fetches for an unused body.
+      let htmlText = !htmlTooComplex ? htmlBody?.text ?? null : null;
+      let inlined = new Set<string>();
+      if (htmlText && attachments.some((a) => a.contentId)) {
+        const r = await inlineCidImages(htmlText, attachments, async (p) => {
+          const d = await client.download(uid, p.part, { uid: true, maxBytes: CID_LIMITS.maxImageBytes + 1 });
+          return d.content ? readBuffer(d.content, CID_LIMITS.maxImageBytes) : null;
+        });
+        htmlText = r.html;
+        inlined = r.inlinedParts;
+      }
       await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
 
       const env = msg.envelope;
-      // Markup that would block the server while sanitizing is shown as plain text instead.
-      const htmlTooComplex = !!htmlBody && isHtmlTooComplex(htmlBody.text);
       const bodyText = textBody?.text || (htmlTooComplex ? htmlToRoughText(htmlBody!.text) : '');
       return {
         id: encodeMessageId(ref.folder, ref.uidValidity, ref.uid),
@@ -434,10 +466,12 @@ export class MailService {
         flagged: msg.flags?.has('\\Flagged') ?? false,
         text: bodyText,
         // Untrusted: sanitized here, then rendered in a sandboxed iframe by the UI.
-        html: htmlBody && !htmlTooComplex ? sanitizeEmailHtml(htmlBody.text) : null,
+        html: htmlText !== null ? sanitizeEmailHtml(htmlText) : null,
         htmlTooComplex,
         truncated: !!(textBody?.truncated || htmlBody?.truncated),
-        attachments: attachments.map((a) => ({ part: a.part, filename: a.filename, size: a.size, contentType: a.contentType, inline: a.inline })),
+        attachments: attachments
+          .filter((a) => !inlined.has(a.part))
+          .map((a) => ({ part: a.part, filename: a.filename, size: a.size, contentType: a.contentType, inline: a.inline })),
       };
     });
   }
@@ -454,6 +488,39 @@ export class MailService {
       if (!d.content) throw new NotFoundException();
       const sink = onStart(part.filename);
       await new Promise<void>((resolve, reject) => {
+        d.content.on('error', reject);
+        sink.on('error', reject);
+        sink.on('finish', resolve);
+        d.content.pipe(sink);
+      });
+    });
+  }
+
+  /**
+   * Streams the complete raw message (RFC 822 source) as a .eml download (D-014).
+   * Refuses over-limit messages up front instead of truncating silently.
+   */
+  async streamRaw(c: MailboxCreds, id: unknown, onStart: (filename: string) => NodeJS.WritableStream) {
+    return this.withMessage(c, id, async (client, ref) => {
+      const uid = String(ref.uid);
+      const msg = await client.fetchOne(uid, { uid: true, envelope: true, size: true }, { uid: true });
+      if (!msg) throw new NotFoundException();
+      if ((msg.size ?? 0) > MAX_RAW_BYTES) {
+        throw new MailError('message_too_large', 413, 'This message is too large to download.');
+      }
+      // Part omitted = the entire rfc822 message. One byte past the cap so an
+      // overflow is detectable: RFC822.SIZE can be absent or under-reported, and a
+      // truncated .eml that looks complete is worse than a failed download.
+      const d = await client.download(uid, undefined, { uid: true, maxBytes: MAX_RAW_BYTES + 1 });
+      if (!d.content) throw new NotFoundException();
+      const base = safeFilename(msg.envelope?.subject, 'message').replace(/\.eml$/i, '');
+      const sink = onStart(`${base}.eml`);
+      await new Promise<void>((resolve, reject) => {
+        let sent = 0;
+        d.content.on('data', (chunk: Buffer) => {
+          sent += chunk.length;
+          if (sent > MAX_RAW_BYTES) d.content.destroy(new Error('raw message exceeds the download limit'));
+        });
         d.content.on('error', reject);
         sink.on('error', reject);
         sink.on('finish', resolve);

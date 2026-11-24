@@ -70,6 +70,17 @@ export interface ContactAddressesTable extends MailboxOwned {
   position: ColumnType<number, number | undefined, number>;
 }
 
+export interface ContactGroupsTable extends MailboxOwned {
+  name: string;
+  created_at: CreatedAt;
+  updated_at: UpdatedAt;
+}
+
+export interface ContactGroupMembersTable extends MailboxOwned {
+  group_id: string;
+  contact_id: string;
+}
+
 export interface RecentRecipientsTable extends MailboxOwned {
   email: string;
   use_count: ColumnType<number, number | undefined, number>;
@@ -115,6 +126,8 @@ export interface Database {
   signatures: SignaturesTable;
   contacts: ContactsTable;
   contact_addresses: ContactAddressesTable;
+  contact_groups: ContactGroupsTable;
+  contact_group_members: ContactGroupMembersTable;
   recent_recipients: RecentRecipientsTable;
   system_settings: SystemSettingsTable;
   audit_events: AuditEventsTable;

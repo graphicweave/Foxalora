@@ -26,7 +26,8 @@ function wrap(html: string) {
 export default function MessageView({ msg, flagged, onToggleFlag }: { msg: MessageFull; flagged: boolean; onToggleFlag: () => void }) {
   const sender = msg.from[0];
   const av = avatarOf(sender);
-  // Inline images are listed too until the viewer can show cid: images (Phase 2 viewer work).
+  // The server inlines referenced cid: images into the HTML as data: URIs (FOX-048);
+  // what remains here are real attachments plus inline parts the body never references.
   const files = msg.attachments;
 
   return (
