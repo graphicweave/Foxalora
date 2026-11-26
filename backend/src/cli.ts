@@ -1,6 +1,8 @@
 /* Operator CLI. The admin console (Phase 3) will cover the same operations. */
 import 'reflect-metadata';
+import { Redis } from 'ioredis';
 import { sql } from 'kysely';
+import { resetAdminPassword } from './admin/admin-reset';
 import { AuditService } from './audit/audit.service';
 import { requireEnv } from './common/tokens';
 import { createDb, migrateToLatest } from './database/database';
@@ -24,6 +26,8 @@ const USAGE = `Usage: node dist/cli.js <command>
   server:list <tenantId>                    show a tenant's servers and domains (DATABASE_URL)
   admin:reset-2fa <email>                   remove an administrator's two-step verification (lost phone);
                                             they set it up again at the next sign-in (DATABASE_URL)
+  admin:reset-password <email>              give an administrator a new random password (forgotten password),
+                                            printed once; ends their open sessions (DATABASE_URL, VALKEY_URL)
   setup:status                              "open" until the setup wizard has created the first administrator (DATABASE_URL)
   seed:dev                                  development tenant for the local test servers (both URLs)
   seed:mail [--force]                       sample messages for carol@ and dave@dovecot.test (DATABASE_URL,
@@ -174,6 +178,25 @@ async function main(argv: string[]) {
       });
       await db.destroy();
       out(`two-step verification removed for ${email}; it is set up again at the next sign-in`);
+      return;
+    }
+    case 'admin:reset-password': {
+      const email = String(args[0] ?? '').trim().toLowerCase();
+      if (!email.includes('@')) throw new Error('usage: admin:reset-password <email>');
+      // The new password is generated here, never taken as an argument (shell history, process list).
+      const db = createDb(requireEnv('DATABASE_URL'), 1);
+      const redis = process.env.VALKEY_URL ? new Redis(process.env.VALKEY_URL, { maxRetriesPerRequest: 2, lazyConnect: true }) : null;
+      try {
+        await redis?.connect();
+        const r = await resetAdminPassword(db, redis, email, 'operator (cli)');
+        out(`New password for ${email}:\n\n  ${r.password}\n`);
+        out('It is shown only this once. Hand it over privately; store it in a password manager.');
+        out('Two-step verification is unchanged (lost phone as well: admin:reset-2fa).');
+        out(r.sessionsEnded === null ? 'VALKEY_URL is not set: open sessions of this administrator were not ended.' : `Open sessions ended: ${r.sessionsEnded}`);
+      } finally {
+        redis?.disconnect();
+        await db.destroy();
+      }
       return;
     }
     case 'setup:status': {

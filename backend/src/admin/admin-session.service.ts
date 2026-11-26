@@ -23,7 +23,28 @@ export interface AdminSession {
 }
 
 const SID = /^[A-Za-z0-9_-]{43}$/;
-const key = (h: string) => `fx:as:${h}`;
+const PREFIX = 'fx:as:';
+const key = (h: string) => `${PREFIX}${h}`;
+
+/**
+ * Ends every session of one administrator (after a password reset). Sessions are stored under the
+ * hash of their id, so the records are scanned; there are only a few administrators.
+ */
+export async function endAdminSessions(redis: Redis, adminId: string): Promise<number> {
+  let ended = 0;
+  let cursor = '0';
+  do {
+    const [next, keys] = await redis.scan(cursor, 'MATCH', `${PREFIX}*`, 'COUNT', 200);
+    cursor = next;
+    if (keys.length === 0) continue;
+    const values = await redis.mget(...keys);
+    const mine = keys.filter((_, i) => {
+      try { return (JSON.parse(values[i] ?? 'null') as AdminSession | null)?.adminId === adminId; } catch { return false; }
+    });
+    if (mine.length) ended += await redis.del(...mine);
+  } while (cursor !== '0');
+  return ended;
+}
 const hashOf = (sid: string) => createHash('sha256').update(sid).digest('hex');
 
 // Production: the __Host- prefix keeps the cookie host-only, Secure and on Path=/ (see auth.guard.ts).

@@ -42,7 +42,7 @@ What exists in draft form: direct login with IMAP and SMTP verification, encrypt
 
 Also built: inline `cid:` images in received mail shown as validated data: URIs (FOX-048) and message download as .eml (D-014).
 
-Admin console at `/admin` (first version, 2026-11-23, `backend/src/admin/`, `frontend/src/admin/`): separate administrator sign-in and session (FOX-081) with required TOTP two-step verification, encrypted secret, single-use codes and hashed backup codes (FOX-134); mail servers add/edit/delete/test and domains add/remove, all audited (FOX-006/007); audit log with filters and CSV export (FOX-085); CLI `admin:reset-2fa`.
+Admin console at `/admin` (first version, 2026-11-23, `backend/src/admin/`, `frontend/src/admin/`): separate administrator sign-in and session (FOX-081) with required TOTP two-step verification, encrypted secret, single-use codes and hashed backup codes (FOX-134); mail servers add/edit/delete/test and domains add/remove, all audited (FOX-006/007); audit log with filters and CSV export (FOX-085); CLI `admin:reset-2fa` and `admin:reset-password`.
 
 What does not exist: language and other preferences beyond the five above, threading, IDLE, connection pooling, admin console parts beyond the first version (branding FOX-082, login page FOX-083, policies FOX-084, health FOX-086, feature toggles FOX-087, inviting more administrators), SSO.
 

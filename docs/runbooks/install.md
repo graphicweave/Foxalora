@@ -106,6 +106,7 @@ Why a user cannot sign in: the login page always shows the same generic message 
 - **Mail servers:** add, edit, delete (only when no domain uses it), and test the connection, as in the setup wizard.
 - **Audit log:** filter by event, date and text; export as CSV. Entries never contain passwords or mail content.
 - **Lost phone and backup codes:** on the server, `./deploy/cli.sh admin:reset-2fa admin@yourdomain.com`; the administrator sets up two-step again at the next sign-in.
+- **Forgotten administrator password:** on the server, `./deploy/cli.sh admin:reset-password admin@yourdomain.com`. It prints a new random password once, signs that administrator out everywhere and records the reset in the audit log. Two-step verification stays as it was.
 - The two-step keys are encrypted with `MASTER_KEYS` in `deploy/.env` (added automatically by `install.sh`). Back it up with the database: without it, every administrator has to set up two-step again.
 
 Sign in at `https://webmail.yourdomain.com` with a mailbox on one of the domains. **Write down how long the install took** (adoption target: 15 minutes).

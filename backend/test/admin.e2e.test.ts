@@ -4,6 +4,7 @@ import { Logger, type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { Redis } from 'ioredis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { newAdminPassword, resetAdminPassword } from '../src/admin/admin-reset';
 import { base32Decode, hotp, stepAt } from '../src/admin/totp';
 import { MailService } from '../src/mail/mail.service';
 import { hashAdminPassword } from '../src/setup/admin-password';
@@ -236,5 +237,27 @@ describe.skipIf(!hasPg || !VALKEY)('admin console over HTTP', () => {
     const admin = await signIn('admin@b.example', PW_B, 1);
     expect((await call('POST', '/admin/auth/logout', { cookie: admin })).status).toBe(204);
     expect((await call('GET', '/admin/servers', { cookie: admin })).status).toBe(401);
+  });
+
+  it('resets a forgotten password from the CLI and ends that administrator\'s sessions only', async () => {
+    expect(newAdminPassword()).toMatch(/^[A-Z2-7]{5}(-[A-Z2-7]{5}){3}$/);
+    await redis.del(...(await redis.keys('fx:au:*')).concat('fx:none'));
+    const adminA = await signIn('admin@a.example', PW_A);
+    const adminB = await signIn('admin@b.example', PW_B);
+    const r = await resetAdminPassword(t.app, redis, 'Admin@A.example', 'operator (cli)');
+    expect(r.sessionsEnded).toBeGreaterThanOrEqual(1);
+    // A's open session is gone; B is untouched.
+    expect((await call('GET', '/admin/servers', { cookie: adminA })).status).toBe(401);
+    expect((await call('GET', '/admin/servers', { cookie: adminB })).status).toBe(200);
+    // Old password refused, new one accepted; two-step is still required (code, not a new enrollment).
+    expect((await call('POST', '/admin/auth/login', { body: { email: 'admin@a.example', password: PW_A } })).status).toBe(401);
+    const login = await call('POST', '/admin/auth/login', { body: { email: 'admin@a.example', password: r.password } });
+    expect(login.status).toBe(200);
+    expect(login.json.next).toBe('code');
+    // Audited without the password.
+    const events = await t.owner.selectFrom('audit_events').selectAll().where('tenant_id', '=', ids.tenantA).where('event_type', '=', 'admin.password_reset').execute();
+    expect(events).toHaveLength(1);
+    expect(JSON.stringify(events)).not.toContain(r.password);
+    await expect(resetAdminPassword(t.app, redis, 'nobody@a.example', 'operator (cli)')).rejects.toThrow(/no administrator/);
   });
 });
