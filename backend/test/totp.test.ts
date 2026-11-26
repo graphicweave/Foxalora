@@ -32,8 +32,8 @@ describe('TOTP', () => {
   });
 
   it('builds an otpauth link for authenticator apps', () => {
-    const url = otpauthUrl('Foxalora (mail.example)', 'admin@example.com', 'JBSWY3DPEHPK3PXP');
-    expect(url).toMatch(/^otpauth:\/\/totp\/Foxalora%20\(mail\.example\)%3Aadmin%40example\.com\?secret=JBSWY3DPEHPK3PXP&issuer=/);
+    const url = otpauthUrl('Foxalora', 'admin@example.com', 'JBSWY3DPEHPK3PXP');
+    expect(url).toBe('otpauth://totp/Foxalora:admin%40example.com?secret=JBSWY3DPEHPK3PXP&issuer=Foxalora');
   });
 
   it('makes ten distinct backup codes and hashes them independent of case and dashes', () => {

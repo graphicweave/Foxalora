@@ -126,7 +126,7 @@ function EnrollCard({ onDone, onRestart }: { onDone: (codes: string[]) => void; 
       </ol>
       {setup ? (
         <div className="admin-qr">
-          <img src={setup.qrSvg} alt="QR code for the authenticator app" width={176} height={176} />
+          <img src={setup.qrSvg} alt="QR code for the authenticator app" width={240} height={240} />
           <div><div className="muted small">Key, if you cannot scan</div><code className="admin-secret">{setup.secret.replace(/(.{4})/g, '$1 ').trim()}</code></div>
         </div>
       ) : !error && <p className="muted">Preparing…</p>}
