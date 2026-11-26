@@ -73,10 +73,14 @@ export function verifyTotp(secretB32: string, code: string, nowMs = Date.now()):
   return match;
 }
 
-/** otpauth:// link that authenticator apps read from the QR code. */
+/**
+ * otpauth:// link that authenticator apps read from the QR code. Kept short on purpose: every
+ * extra character makes the QR code denser and harder for phone cameras to read. SHA-1, 6 digits
+ * and 30 seconds are the defaults of every authenticator app, so they are not repeated in the link.
+ */
 export function otpauthUrl(issuer: string, account: string, secretB32: string): string {
-  const label = encodeURIComponent(`${issuer}:${account}`);
-  const q = new URLSearchParams({ secret: secretB32, issuer, algorithm: 'SHA1', digits: String(DIGITS), period: String(STEP_SECONDS) });
+  const label = `${encodeURIComponent(issuer)}:${encodeURIComponent(account)}`;
+  const q = new URLSearchParams({ secret: secretB32, issuer });
   return `otpauth://totp/${label}?${q.toString()}`;
 }
 

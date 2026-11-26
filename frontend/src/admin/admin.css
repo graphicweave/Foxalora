@@ -1,7 +1,7 @@
 /* Admin console (E12). Built on the app's design tokens and the setup wizard's form styles. */
 .admin-auth { max-width: 460px; }
 .admin-qr { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
-.admin-qr img { background: #fff; border-radius: 8px; padding: 6px; }
+.admin-qr img { display: block; max-width: 100%; height: auto; background: #fff; border-radius: 8px; }
 .admin-secret { display: inline-block; margin-top: 4px; font-size: 14px !important; letter-spacing: .04em; }
 .admin-backup { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
 .admin-backup code { display: block; padding: 8px; text-align: center; font-size: 14px !important; }

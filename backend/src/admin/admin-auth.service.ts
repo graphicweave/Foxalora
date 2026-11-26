@@ -72,7 +72,7 @@ export class AdminAuthService {
     await this.tenantDb.run({ tenantId: s.tenantId }, (trx) =>
       trx.updateTable('admin_users').set({ totp_secret: JSON.stringify(token), updated_at: new Date() }).where('id', '=', s.adminId).execute());
     const url = otpauthUrl(issuer, s.email, secret);
-    const qr = await QRCode.toString(url, { type: 'svg', errorCorrectionLevel: 'M', margin: 1 });
+    const qr = await QRCode.toString(url, { type: 'svg', errorCorrectionLevel: 'M', margin: 4 });
     return { secret, otpauthUrl: url, qrSvg: `data:image/svg+xml;base64,${Buffer.from(qr).toString('base64')}` };
   }
 

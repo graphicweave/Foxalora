@@ -4,7 +4,6 @@ import { randomInt } from 'node:crypto';
 import { AuditService } from '../audit/audit.service';
 import { hasCsrfHeader } from '../auth/auth.guard';
 import { LoginThrottleService } from '../auth/login-throttle.service';
-import { requestHost } from '../http';
 import { ADMIN_COOKIE, AdminSessionService } from './admin-session.service';
 import { AdminAuthService, CodeRejected } from './admin-auth.service';
 import { AdminGuard, AllowPasswordStage, type AdminRequest } from './admin.guard';
@@ -81,7 +80,7 @@ export class AdminAuthController {
   @AllowPasswordStage()
   async enroll(@Req() req: AdminRequest) {
     if (req.admin.stage !== 'password') throw new BadRequestException('already signed in');
-    return this.auth.startEnrollment(req.admin, `Foxalora (${requestHost(req)})`);
+    return this.auth.startEnrollment(req.admin, 'Foxalora');
   }
 
   @Post('verify')
