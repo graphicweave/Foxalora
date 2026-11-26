@@ -56,7 +56,8 @@ server {
     # Empty in a normal install.
     include /etc/nginx/foxalora.d/*.conf;
 
-    location = /api/v1/auth/login {
+    # Mailbox login, admin sign-in and admin code entry share the per-address rate limit.
+    location ~ ^/api/v1/(auth/login|admin/auth/(login|verify))$ {
         limit_req zone=fx_login burst=10 nodelay;
         limit_req_status 429;
         proxy_pass http://api:3000;

@@ -6,6 +6,7 @@ import * as m0003 from './migrations/0003_recent_recipients';
 import * as m0004 from './migrations/0004_server_saves_sent';
 import * as m0005 from './migrations/0005_admin_users_and_setup';
 import * as m0006 from './migrations/0006_contact_groups';
+import * as m0007 from './migrations/0007_admin_console';
 import type { Database } from './schema';
 
 /** Migrations are listed explicitly (no directory scanning in production images). */
@@ -16,6 +17,7 @@ const MIGRATIONS: Record<string, Migration> = {
   '0004_server_saves_sent': m0004,
   '0005_admin_users_and_setup': m0005,
   '0006_contact_groups': m0006,
+  '0007_admin_console': m0007,
 };
 
 export function createDb(connectionString: string, max = 10): Kysely<Database> {

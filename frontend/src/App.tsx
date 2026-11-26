@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from './api';
 import Login from './components/Login';
 import Shell from './components/Shell';
+import AdminApp from './admin/AdminApp';
 import SetupWizard from './setup/SetupWizard';
 import { ConfirmProvider } from './ui/ConfirmProvider';
 import { ToastProvider } from './ui/Toasts';
@@ -10,6 +11,8 @@ import { TooltipLayer } from './ui/TooltipLayer';
 export default function App() {
   // First-run setup (FOX-099): its own page, outside the mailbox session.
   if (window.location.pathname === '/setup') return <SetupWizard />;
+  // Admin console (E12): its own sign-in and session, apart from mailbox users.
+  if (window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin/')) return <AdminApp />;
   return <MailApp />;
 }
 

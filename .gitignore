@@ -17,6 +17,7 @@ deploy/letsencrypt/
 *.log
 .vite/
 dev/.vault-key
+dev/.master-key
 deploy/testing/certs/
 deploy/testing/gate/
 

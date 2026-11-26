@@ -12,6 +12,11 @@ if [ ! -s "$DEV_DIR/.vault-key" ]; then
   (umask 077 && openssl rand -base64 32 > "$DEV_DIR/.vault-key")
 fi
 export FOXALORA_VAULT_KEYS="dev1:$(cat "$DEV_DIR/.vault-key")"
+# Envelope key for stored secrets (admin two-step keys), kept per machine like the vault key.
+if [ ! -s "$DEV_DIR/.master-key" ]; then
+  (umask 077 && openssl rand -base64 32 > "$DEV_DIR/.master-key")
+fi
+export FOXALORA_MASTER_KEYS="devm1:$(cat "$DEV_DIR/.master-key")"
 
 # Trust the private test CA of the local mail servers; certificate checks stay on.
 export NODE_EXTRA_CA_CERTS="$DEV_DIR/mailservers/certs/ca.pem"

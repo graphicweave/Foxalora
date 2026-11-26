@@ -113,6 +113,8 @@ export interface AdminUsersTable {
   password_hash: string;
   role: ColumnType<'owner' | 'admin', 'owner' | 'admin' | undefined, 'owner' | 'admin'>;
   totp_secret: ColumnType<unknown | null, string | null | undefined, string | null>;
+  totp_enabled_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  backup_codes: ColumnType<string[], string | undefined, string>;
   last_login_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
   created_at: CreatedAt;
   updated_at: UpdatedAt;
